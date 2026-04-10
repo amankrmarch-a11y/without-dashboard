@@ -931,6 +931,18 @@ export default function App() {
   // ── CRM state ────────────────────────────────────────────────────────────────
   const[crmData,setCrmData]=useState(()=>lsGet("wo_crm",EMPTY_CRM));
 
+  // ── Date filter states ────────────────────────────────────────────────────────
+  const[ovFrom,setOvFrom]=useState("");
+  const[ovTo,setOvTo]=useState("");
+  const[crmFromDate,setCrmFromDate]=useState("");
+  const[crmToDate,setCrmToDate]=useState("");
+  const[crmAppliedFrom,setCrmAppliedFrom]=useState("");
+  const[crmAppliedTo,setCrmAppliedTo]=useState("");
+  const[invFromDate,setInvFromDate]=useState("");
+  const[invToDate,setInvToDate]=useState("");
+  const[adsFromDate,setAdsFromDate]=useState("");
+  const[adsToDate,setAdsToDate]=useState("");
+
   // ── Zoho Live Sync ─────────────────────────────────────────────────────────
   const[zohoSyncing,setZohoSyncing]=useState(false);
   const[zohoSyncStatus,setZohoSyncStatus]=useState(null); // null | 'success' | 'error'
