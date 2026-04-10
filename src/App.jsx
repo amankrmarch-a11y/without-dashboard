@@ -479,6 +479,37 @@ function SectionHead({title,sub}){
   );
 }
 
+// Consistent page header — used on ALL tabs
+function PageHeader({supra,title,right}){
+  return(
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10,marginBottom:4}}>
+      <div>
+        <div style={{fontSize:10,color:C.muted,textTransform:"uppercase",letterSpacing:2,fontWeight:700,marginBottom:2}}>{supra||"Without® · Analytics"}</div>
+        <h1 style={{fontSize:20,fontWeight:800,letterSpacing:-0.5,color:C.text}}>{title}</h1>
+      </div>
+      {right&&<div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>{right}</div>}
+    </div>
+  );
+}
+
+// Consistent inline date filter pill — same on every page
+function DatePill({from,setFrom,to,setTo}){
+  return(
+    <div style={{display:"flex",alignItems:"center",gap:6,background:C.card,border:`1px solid ${C.border}`,borderRadius:10,padding:"5px 12px",boxShadow:"0 1px 4px rgba(45,45,78,0.06)"}}>
+      <span style={{fontSize:10,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1,whiteSpace:"nowrap"}}>Period</span>
+      <input type="date" value={from} onChange={e=>setFrom(e.target.value)}
+        style={{border:"none",background:"transparent",fontSize:11,color:C.text,outline:"none",cursor:"pointer",fontFamily:"inherit"}}/>
+      <span style={{fontSize:11,color:C.muted}}>–</span>
+      <input type="date" value={to} onChange={e=>setTo(e.target.value)}
+        style={{border:"none",background:"transparent",fontSize:11,color:C.text,outline:"none",cursor:"pointer",fontFamily:"inherit"}}/>
+      {(from||to)&&(
+        <button onClick={()=>{setFrom("");setTo("");}}
+          style={{background:"none",border:"none",color:C.muted,cursor:"pointer",fontSize:12,padding:"0 2px",fontWeight:700,lineHeight:1}}>✕</button>
+      )}
+    </div>
+  );
+}
+
 // Custom tooltip
 function TT({active,payload,label}){
   if(!active||!payload?.length) return null;
@@ -1588,14 +1619,12 @@ export default function App() {
 
           const rc=r=>r>=4?"#15803d":r>=2?C.accent:r>=1?"#d97706":r>0?C.down:C.muted;
           const kpis=[
-            {label:"B2B Revenue",       val:fmtINR(b2bRevHome),  sub:"Closed+Overdue · B2B invoices",       primary:true, click:()=>setPage("invoices")},
-            {label:"D2C Revenue",        val:fmtINR(d2cRevHome),  sub:"Shopify · Amazon · B2C Offline",      col:"#0a66c2",click:()=>setPage("invoices")},
-            {label:"Total Ad Spend",     val:fmtINR(tSpend),      sub:"Meta + LinkedIn + Google",            col:C.primary,click:()=>setPage("ads")},
-            {label:"B2B ROAS",           val:trueROASHome>0?`${trueROASHome}x`:"—", sub:trueROASHome>=4?"Excellent":trueROASHome>=2?"Good":trueROASHome>=1?"Break-even":trueROASHome>0?"Below BE":"Need invoice+ad data", col:rc(trueROASHome)},
-            {label:"D2C ROAS",           val:d2cROAS>0?`${d2cROAS}x`:"—",          sub:d2cROAS>=4?"Excellent":d2cROAS>=2?"Good":d2cROAS>=1?"Break-even":d2cROAS>0?"Below BE":"Need invoice+ad data",                      col:rc(d2cROAS)},
-            {label:"Closed Won (CRM)",   val:String(crmB2BWon.length),  sub:crmB2BWon.reduce((s,r)=>s+r.amount,0)>0?fmtINR(crmB2BWon.reduce((s,r)=>s+r.amount,0))+" won":"B2B · by closing date",  col:"#16a34a", click:()=>setPage("crm")},
-            {label:"Lost (FA)",          val:String(crmB2BFA.length),   sub:"Closed Lost Internal FA",        col:"#f59e0b", click:()=>setPage("crm")},
-            {label:"Closed Lost",        val:String(crmB2BLost.length), sub:"B2B · by closing date",          col:C.down,   click:()=>setPage("crm")},
+            {label:"B2B Revenue",      val:fmtINR(b2bRevHome), sub:"Closed+Overdue · B2B invoices",    primary:true, click:()=>setPage("invoices")},
+            {label:"D2C Revenue",      val:fmtINR(d2cRevHome), sub:"Shopify · Amazon · B2C Offline",   col:"#0a66c2",click:()=>setPage("invoices")},
+            {label:"Total Ad Spend",   val:fmtINR(tSpend),     sub:"Meta + LinkedIn + Google",         col:C.primary,click:()=>setPage("ads")},
+            {label:"B2B ROAS",         val:trueROASHome>0?`${trueROASHome}x`:"—", sub:trueROASHome>=4?"Excellent":trueROASHome>=2?"Good":trueROASHome>=1?"Break-even":trueROASHome>0?"Below BE":"Need invoice+ad data", col:rc(trueROASHome)},
+            {label:"D2C ROAS",         val:d2cROAS>0?`${d2cROAS}x`:"—",          sub:d2cROAS>=4?"Excellent":d2cROAS>=2?"Good":d2cROAS>=1?"Break-even":d2cROAS>0?"Below BE":"Need invoice+ad data", col:rc(d2cROAS)},
+            {label:"Closed Won (CRM)", val:String(crmB2BWon.length), sub:crmB2BWon.reduce((s,r)=>s+r.amount,0)>0?fmtINR(crmB2BWon.reduce((s,r)=>s+r.amount,0))+" won":"B2B · by closing date", col:"#16a34a", click:()=>setPage("crm")},
           ];
           return(
           <div style={{display:"flex",flexDirection:"column",gap:16}}>
@@ -1659,25 +1688,7 @@ export default function App() {
 
 
 
-            {/* Quick nav cards */}
-            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:10}}>
-              {[
-                {id:"ads",icon:"📊",title:"Ads Dashboard",desc:"Meta · LinkedIn · Google spend, CPL, CTR, ROAS trends",col:C.meta},
-                {id:"crm",icon:"◈",title:"CRM Pipeline",desc:"Deal pipeline, win rates, Closed Won/Lost breakdown",col:"#7c3aed"},
-                {id:"invoices",icon:"₹",title:"Zoho Books",desc:"B2B invoice revenue, monthly trends, top customers",col:C.accent},
-                {id:"estimate",icon:"◎",title:"Budget Estimator",desc:"Input budget + lead target → get channel breakdown",col:"#0a66c2"},
-              ].map(c=>(
-                <div key={c.id} onClick={()=>setPage(c.id)} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:12,padding:"14px 16px",cursor:"pointer",display:"flex",gap:12,alignItems:"flex-start",boxShadow:"0 1px 3px rgba(0,0,0,0.04)",transition:"all .15s"}}
-                  onMouseEnter={e=>{e.currentTarget.style.borderColor=c.col;e.currentTarget.style.transform="translateY(-1px)"}}
-                  onMouseLeave={e=>{e.currentTarget.style.borderColor=C.border;e.currentTarget.style.transform=""}}>
-                  <div style={{width:32,height:32,borderRadius:8,background:`${c.col}14`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>{c.icon}</div>
-                  <div>
-                    <div style={{fontWeight:700,fontSize:12,color:C.text,marginBottom:3}}>{c.title}</div>
-                    <div style={{fontSize:11,color:C.muted,lineHeight:1.5}}>{c.desc}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
+
 
             {/* Revenue vs Spend mini chart if both data available */}
             {monthlyRevSpend.length>0&&tSpend>0&&(
@@ -1708,12 +1719,13 @@ export default function App() {
           <div style={{display:"flex",flexDirection:"column",gap:16,maxWidth:"100%"}}>
 
             {/* Header */}
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:8}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
               <div>
                 <div style={{fontSize:10,color:C.muted,textTransform:"uppercase",letterSpacing:2,fontWeight:700,marginBottom:2}}>Without® · Paid Media</div>
-                <h1 style={{fontSize:20,fontWeight:800,color:C.text,letterSpacing:-0.5}}>Ads Dashboard</h1>
+                <h1 style={{fontSize:20,fontWeight:800,color:C.text,letterSpacing:-0.5}}>Ad Spend</h1>
               </div>
-              <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+              <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                <DatePill from={adsFromDate} setFrom={setAdsFromDate} to={adsToDate} setTo={setAdsToDate}/>
                 {hasLive&&(
                   <div style={{position:"relative"}}>
                     <button onClick={()=>setExportOpen(o=>!o)}
@@ -1765,8 +1777,6 @@ export default function App() {
               {/* ── Filter bar ─────────────────────────────────────────────── */}
               <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:14,padding:"12px 16px",display:"flex",flexDirection:"column",gap:8,boxShadow:"0 1px 3px rgba(0,0,0,0.04)"}}>
                 <div style={{display:"flex",flexWrap:"wrap",gap:10,alignItems:"center"}}>
-                  <DateFilter fromDate={adsFromDate} setFromDate={setAdsFromDate} toDate={adsToDate} setToDate={setAdsToDate} label="Period"/>
-                  <div style={{width:1,height:16,background:C.border}}/>
                   <span style={{fontSize:10,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>Channel</span>
                   {["all","Meta","LinkedIn","Google"].map(ch=>{
                     const hasData = ch==="all" || liveData[ch.toLowerCase()]?.length>0;
@@ -2262,31 +2272,14 @@ export default function App() {
           <div style={{display:'flex',flexDirection:'column',gap:16}}>
 
             {/* ── Header ───────────────────────────────────────────────────── */}
-            <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-end',flexWrap:'wrap',gap:8}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:8}}>
               <div>
-                <div style={{fontSize:10,color:C.muted,textTransform:'uppercase',letterSpacing:2,fontWeight:700,marginBottom:2}}>Deal Pipeline</div>
-                <h1 style={{fontSize:20,fontWeight:800,letterSpacing:-.5}}>CRM Dashboard</h1>
+                <div style={{fontSize:10,color:C.muted,textTransform:'uppercase',letterSpacing:2,fontWeight:700,marginBottom:2}}>Without® · CRM</div>
+                <h1 style={{fontSize:20,fontWeight:800,letterSpacing:-.5}}>Revenue</h1>
               </div>
-              <div style={{display:'flex',gap:6,alignItems:'center',flexWrap:'wrap'}}>
-                <DateFilter fromDate={crmFromDate} setFromDate={setCrmFromDate} toDate={crmToDate} setToDate={setCrmToDate} label="Closing date"/>
-                <button
-                  onClick={()=>{ setCrmAppliedFrom(crmFromDate); setCrmAppliedTo(crmToDate); }}
-                  style={{background:C.accent,color:'#fff',border:'none',borderRadius:7,padding:'5px 16px',fontSize:11,fontWeight:800,cursor:'pointer',whiteSpace:'nowrap'}}>
-                  Apply
-                </button>
-                {(crmAppliedFrom||crmAppliedTo)&&(
-                  <button onClick={()=>{ setCrmFromDate(''); setCrmToDate(''); setCrmAppliedFrom(''); setCrmAppliedTo(''); }}
-                    style={{background:'none',border:`1px solid ${C.border}`,borderRadius:7,padding:'5px 10px',fontSize:11,color:C.muted,cursor:'pointer'}}>
-                    ✕ Clear filter
-                  </button>
-                )}
-                {(crmAppliedFrom||crmAppliedTo)&&(
-                  <span style={{fontSize:10,color:C.accent,fontWeight:700}}>
-                    {crmAppliedFrom||'start'} → {crmAppliedTo||'end'}
-                  </span>
-                )}
-                {hasCrm&&<button onClick={()=>setCrmData(EMPTY_CRM)} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:7,padding:'5px 10px',fontSize:11,fontWeight:600,color:C.muted,cursor:'pointer'}}>🗑 Clear CRM</button>}
-
+              <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
+                <DatePill from={crmFromDate} setFrom={v=>{setCrmFromDate(v);setCrmAppliedFrom(v);}} to={crmToDate} setTo={v=>{setCrmToDate(v);setCrmAppliedTo(v);}}/>
+                {hasCrm&&<button onClick={()=>setCrmData(EMPTY_CRM)} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:8,padding:'5px 10px',fontSize:11,fontWeight:600,color:C.muted,cursor:'pointer'}}>🗑 Clear</button>}
               </div>
             </div>
 
@@ -2750,16 +2743,15 @@ export default function App() {
 
           return(
           <div style={{display:"flex",flexDirection:"column",gap:16,maxWidth:"100%"}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",flexWrap:"wrap",gap:8}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
               <div>
-                <div style={{fontSize:10,color:C.muted,textTransform:"uppercase",letterSpacing:2,fontWeight:700,marginBottom:2}}>B2B Revenue Intelligence</div>
-                <h1 style={{fontSize:20,fontWeight:800,color:C.text,letterSpacing:-0.5}}>Invoice Dashboard</h1>
+                <div style={{fontSize:10,color:C.muted,textTransform:"uppercase",letterSpacing:2,fontWeight:700,marginBottom:2}}>Without® · Finance</div>
+                <h1 style={{fontSize:20,fontWeight:800,color:C.text,letterSpacing:-0.5}}>Invoices</h1>
               </div>
-              <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
-                <DateFilter fromDate={invFromDate} setFromDate={setInvFromDate} toDate={invToDate} setToDate={setInvToDate} label="Invoice date"/>
+              <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+                <DatePill from={invFromDate} setFrom={setInvFromDate} to={invToDate} setTo={setInvToDate}/>
                 {hasInv&&<button onClick={()=>setInvoiceData(EMPTY_INV)}
-                  style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:7,padding:"5px 10px",fontSize:11,fontWeight:600,color:C.muted,cursor:"pointer"}}>🗑 Clear</button>}
-
+                  style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:8,padding:"5px 10px",fontSize:11,fontWeight:600,color:C.muted,cursor:"pointer"}}>🗑 Clear</button>}
               </div>
             </div>
 
