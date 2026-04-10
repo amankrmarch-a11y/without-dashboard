@@ -906,9 +906,8 @@ function mergeCrmDeals(existing, incoming) {
 export default function App() {
   const libsReady=useLibsReady();
   const[darkMode,setDarkMode]=useState(()=>lsGet("wo_dark",false));
-  useEffect(()=>{ lsSave("wo_dark",darkMode); },[darkMode]);
-  // Update global C for this render
-  C = darkMode ? THEMES.dark : THEMES.light;
+  C=darkMode?THEMES.dark:THEMES.light;
+
   const[page,setPage]=useState("home");
   const[files,setFiles]=useState({meta:[],linkedin:[],google:[]});
   const[submitting,setSub]=useState(false);
@@ -918,6 +917,24 @@ export default function App() {
   const[clearConfirm,setClearConfirm]=useState(false);
   const[histClearConfirm,setHistClearConfirm]=useState(false);
   const[exportOpen,setExportOpen]=useState(false);
+
+  // ── Live data (ad spend) ──────────────────────────────────────────────────
+  const[liveData,setLive]=useState(()=>lsGet("wo_liveData",EMPTY_LIVE));
+  const[folders,setFolders]=useState(()=>lsGet("wo_folders",[]));
+  useEffect(()=>{ lsSave("wo_liveData",liveData); },[liveData]);
+  useEffect(()=>{ lsSave("wo_folders",folders); },[folders]);
+
+  // ── Ad spend UI state ─────────────────────────────────────────────────────
+  const[activeChan,setActiveChan]=useState("all");
+  const[budgetGoal,setBudgetGoal]=useState("");
+  const[budgetUsed,setBudgetUsed]=useState(null);
+  const[revPerLead,setRevPerLead]=useState("");
+
+  // ── Estimate state ────────────────────────────────────────────────────────
+  const[estBudget,setEstBudget]=useState("");
+  const[estLeads,setEstLeads]=useState("");
+  const[estResult,setEstResult]=useState(null);
+  useEffect(()=>{ lsSave("wo_dark",darkMode); },[darkMode]);
 
   // ── Invoice state ────────────────────────────────────────────────────────────
   const[invoiceData,setInvoiceData]=useState(()=>lsGet("wo_invoices",EMPTY_INV));
@@ -930,6 +947,13 @@ export default function App() {
 
   // ── CRM state ────────────────────────────────────────────────────────────────
   const[crmData,setCrmData]=useState(()=>lsGet("wo_crm",EMPTY_CRM));
+  const[crmFiles,setCrmFiles]=useState([]);
+  const[crmSub,setCrmSub]=useState(false);
+  const[crmDone,setCrmDone]=useState(false);
+  const[crmError,setCrmError]=useState(null);
+  const[crmDebug,setCrmDebug]=useState(null);
+  const[selectedOwner,setSelectedOwner]=useState(null);
+  useEffect(()=>{ lsSave("wo_crm",crmData); },[crmData]);
 
   // ── Date filter states ────────────────────────────────────────────────────────
   const[ovFrom,setOvFrom]=useState("");
