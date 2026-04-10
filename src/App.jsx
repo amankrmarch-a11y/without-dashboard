@@ -896,6 +896,84 @@ export default function App() {
 
   // ── CRM state ────────────────────────────────────────────────────────────────
   const[crmData,setCrmData]=useState(()=>lsGet("wo_crm",EMPTY_CRM));
+
+  // ── Zoho Live Sync ─────────────────────────────────────────────────────────
+  const[zohoSyncing,setZohoSyncing]=useState(false);
+  const[zohoSyncStatus,setZohoSyncStatus]=useState(null); // null | 'success' | 'error'
+  const[zohoLastSync,setZohoLastSync]=useState(()=>lsGet("wo_last_sync",null));
+  useEffect(()=>{ lsSave("wo_last_sync",zohoLastSync); },[zohoLastSync]);
+
+  const syncZoho = async () => {
+    setZohoSyncing(true); setZohoSyncStatus(null);
+    const results = [];
+    try {
+      // ── Sync CRM ───────────────────────────────────────────────────────────
+      const crmRes = await fetch('/api/zoho?source=crm');
+      const crmJson = await crmRes.json();
+      if(crmJson.success && crmJson.data) {
+        // Convert Zoho CRM API format to dashboard format
+        const seen = new Set();
+        const parsed = crmJson.data.map(d => {
+          const id = d.id || `crm_${Math.random()}`;
+          if(seen.has(id)) return null; seen.add(id);
+          const type     = d.Deal_Type_B2B_B2C_etc || '';
+          const stage    = d.Stage || '';
+          const owner    = d.Owner?.name || '';
+          const amount   = parseFloat(d.Amount||0)||0;
+          const closing  = (d.Closing_Date||'').slice(0,10);
+          const created  = (d.Created_Time||'').slice(0,10);
+          const isB2B    = /^B2B/i.test(type);
+          let stageClass;
+          if(stage==='Closed Won') stageClass='closedWon';
+          else if(stage==='Closed Lost (Internal Issues FA)') stageClass='lostFA';
+          else if(stage==='Closed Lost') stageClass='closedLost';
+          else stageClass='active';
+          let closingMonth=null,closingYear=null;
+          if(closing&&closing.length>=7){
+            const mi=parseInt(closing.slice(5,7),10)-1;
+            if(mi>=0&&mi<=11){closingMonth=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][mi];closingYear=parseInt(closing.slice(0,4),10);}
+          }
+          return {id,name:d.Deal_Name||'',account:d.Account_Name?.name||'',type,stage,stageClass,owner,amount,closing,created,closingMonth,closingYear,isB2B};
+        }).filter(Boolean);
+        setCrmData(parsed);
+        results.push(`✅ CRM: ${parsed.length} deals synced`);
+      } else { results.push(`⚠️ CRM sync failed`); }
+
+      // ── Sync Invoices ──────────────────────────────────────────────────────
+      const invRes = await fetch('/api/zoho?source=invoices');
+      const invJson = await invRes.json();
+      if(invJson.success && invJson.data) {
+        const seen2 = new Set();
+        const parsed2 = invJson.data.map(inv => {
+          const invNum = inv.invoice_number||inv.invoice_id;
+          if(!invNum||seen2.has(invNum)) return null; seen2.add(invNum);
+          const status = inv.status==='paid'?'Closed':inv.status==='overdue'?'Overdue':inv.status==='unpaid'?'Overdue':null;
+          if(!['Closed','Overdue'].includes(status)) return null;
+          const bizType = inv.cf_business_type||inv.custom_field_hash?.cf_business_type||'';
+          if(/^grant/i.test(bizType)||bizType.length<2) return null;
+          const subtotal = parseFloat(inv.total||0)||0;
+          const balance  = parseFloat(inv.balance||0)||0;
+          const customer = inv.customer_name||'';
+          const dateStr  = inv.date||'';
+          // toMonth logic
+          const ML={jan:"Jan",feb:"Feb",mar:"Mar",apr:"Apr",may:"May",jun:"Jun",jul:"Jul",aug:"Aug",sep:"Sep",oct:"Oct",nov:"Nov",dec:"Dec"};
+          let month="—", yearMonth=dateStr.slice(0,7)||"—";
+          if(dateStr&&dateStr.length>=7){const mi=parseInt(dateStr.slice(5,7),10)-1;const names=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];month=names[mi]||"—";}
+          return {invoiceNumber:invNum,month,yearMonth,status,businessType:bizType,subtotal,balance,customer};
+        }).filter(Boolean);
+        setInvoiceData(parsed2);
+        results.push(`✅ Invoices: ${parsed2.length} synced`);
+      } else { results.push(`⚠️ Invoice sync failed`); }
+
+      setZohoLastSync(new Date().toLocaleString('en-IN'));
+      setZohoSyncStatus('success');
+      setZohoSyncStatus(results.join(' · '));
+    } catch(err) {
+      setZohoSyncStatus('❌ Error: ' + err.message);
+    } finally {
+      setZohoSyncing(false);
+    }
+  };
   const[crmFiles,setCrmFiles]=useState([]);
   const[crmSub,setCrmSub]=useState(false);
   const[crmDone,setCrmDone]=useState(false);
@@ -1967,6 +2045,31 @@ export default function App() {
         {/* ══ UPLOAD ════════════════════════════════════════════════════════ */}
         {page==="upload"&&(
           <div style={{display:"flex",flexDirection:"column",gap:20,maxWidth:"100%"}}>
+
+            {/* ── Zoho Live Sync Card ─────────────────────────────────── */}
+            <div style={{background:C.primary,borderRadius:18,padding:"20px 24px",boxShadow:"0 4px 20px rgba(45,45,78,0.2)"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12}}>
+                <div>
+                  <div style={{fontSize:11,color:"rgba(255,255,255,0.6)",textTransform:"uppercase",letterSpacing:1.5,fontWeight:700,marginBottom:4}}>Auto Sync</div>
+                  <div style={{fontSize:18,fontWeight:800,color:"#fff",marginBottom:4}}>Zoho CRM + Books</div>
+                  <div style={{fontSize:12,color:"rgba(255,255,255,0.6)"}}>
+                    {zohoLastSync ? `Last synced: ${zohoLastSync}` : "Never synced — click to pull live data"}
+                  </div>
+                  {zohoSyncStatus&&typeof zohoSyncStatus==="string"&&(
+                    <div style={{marginTop:8,fontSize:11,color:"rgba(255,255,255,0.8)",background:"rgba(255,255,255,0.1)",borderRadius:8,padding:"6px 12px",display:"inline-block"}}>{zohoSyncStatus}</div>
+                  )}
+                </div>
+                <button onClick={syncZoho} disabled={zohoSyncing}
+                  style={{background:zohoSyncing?"rgba(255,255,255,0.2)":"#b5e550",color:zohoSyncing?"rgba(255,255,255,0.6)":"#1a1f18",
+                    border:"none",borderRadius:12,padding:"12px 28px",fontSize:14,fontWeight:800,cursor:zohoSyncing?"not-allowed":"pointer",
+                    display:"flex",alignItems:"center",gap:8,transition:"all .2s",boxShadow:zohoSyncing?"none":"0 4px 14px rgba(181,229,80,0.3)"}}>
+                  {zohoSyncing
+                    ? <><span style={{display:"inline-block",animation:"spin 1s linear infinite"}}>⟳</span> Syncing...</>
+                    : <><span>⚡</span> Sync Now</>}
+                </button>
+              </div>
+            </div>
+
             <div>
               <div style={{fontSize:10,color:C.muted,textTransform:"uppercase",letterSpacing:2,fontWeight:700,marginBottom:2}}>Data Input</div>
               <h1 style={{fontSize:22,fontWeight:800,letterSpacing:-0.5}}>Upload Ad Spend Data</h1>
