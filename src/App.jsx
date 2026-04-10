@@ -113,8 +113,11 @@ function toYearMonth(raw) {
 
 const fmtINR = n => {
   if(!n&&n!==0) return "₹0";
-  if(n>=100000) return `₹${(n/100000).toFixed(1)}L`;
-  if(n>=1000)   return `₹${(n/1000).toFixed(1)}K`;
+  if(n>=100000) {
+    const v = (n/100000).toFixed(2);
+    return `₹${v.replace(/\.?0+$/,'')}L`;
+  }
+  if(n>=1000) return `₹${(n/1000).toFixed(1)}K`;
   return `₹${Math.round(n)}`;
 };
 const fmtNum = n => {
@@ -1118,6 +1121,8 @@ export default function App() {
   const[crmDebug,setCrmDebug]=useState(null);
   useEffect(()=>{ lsSave("wo_crm",crmData); },[crmData]);
   // CRM date filter
+  const[ovFrom,setOvFrom]=useState("");
+  const[ovTo,setOvTo]=useState("");
   const[crmFromDate,setCrmFromDate]=useState("");
   const[crmToDate,setCrmToDate]=useState("");
   // Applied filter — only updates when user clicks Apply
@@ -1543,56 +1548,54 @@ export default function App() {
 
         {/* ══ HOME ══════════════════════════════════════════════════════════ */}
         {page==="home"&&(()=>{
-          const b2bRevHome = invoiceData.filter(r=>selMonths.length===0||selMonths.includes(r.yearMonth||r.month)).reduce((s,r)=>s+r.subtotal,0);
-          const trueROASHome = b2bRevHome>0&&tSpend>0?parseFloat((b2bRevHome/tSpend).toFixed(2)):0;
-          const rc=r=>r>=4?"#15803d":r>=2?C.accent:r>=1?"#d97706":r>0?C.down:C.muted;
+          // ── Overview date filter ─────────────────────────────────────────────
+          const inOvRange = dateStr => {
+            if(!ovFrom && !ovTo) return true;
+            if(!dateStr) return false;
+            const d = dateStr.slice(0,10);
+            if(ovFrom && d < ovFrom) return false;
+            if(ovTo   && d > ovTo)   return false;
+            return true;
+          };
 
-          // ── Best Performer from CRM (synced to crmAppliedFrom/To) ──────────
-          const bestPerformer = (() => {
-            if(!crmData.length) return null;
-            const hasFilter = !!(crmAppliedFrom||crmAppliedTo);
-            const inC = date => { if(!hasFilter) return true; if(!date) return false; if(crmAppliedFrom&&date<crmAppliedFrom) return false; if(crmAppliedTo&&date>crmAppliedTo) return false; return true; };
-            const filtered = crmData.filter(r=>r.isB2B&&(r.stageClass==='active'?inC(r.created):inC(r.closing)));
-            if(!filtered.length) return null;
-            const ownerMap={};
-            filtered.forEach(r=>{
-              const o=r.owner||'Unknown';
-              if(!ownerMap[o]) ownerMap[o]={owner:o,total:0,won:0,wonValue:0};
-              ownerMap[o].total++;
-              if(r.stageClass==='closedWon'){ownerMap[o].won++;ownerMap[o].wonValue+=r.amount;}
-            });
-            const owners=Object.values(ownerMap).filter(o=>o.total>0);
-            if(!owners.length) return null;
-            // Score: 40% won value rank + 40% deal count rank + 20% conversion rate rank
-            const sortedByValue=  [...owners].sort((a,b)=>b.wonValue-a.wonValue);
-            const sortedByCount=  [...owners].sort((a,b)=>b.total-a.total);
-            const sortedByConv=   [...owners].sort((a,b)=>(b.won/b.total)-(a.won/a.total));
-            const n=owners.length;
-            owners.forEach(o=>{
-              const vRank=(n-sortedByValue.indexOf(o))/n;
-              const cRank=(n-sortedByCount.indexOf(o))/n;
-              const cvRank=(n-sortedByConv.indexOf(o))/n;
-              o.score=0.4*vRank+0.4*cRank+0.2*cvRank;
-              o.convRate=o.total>0?((o.won/o.total)*100).toFixed(0):0;
-            });
-            return owners.sort((a,b)=>b.score-a.score)[0];
-          })();
+          // ── Invoice revenue filtered by overview date ─────────────────────────
+          // B2B ROAS = B2B Invoice Revenue (Closed+Overdue, type starts "B2B") / Total Ad Spend
+          const isB2BInv = bt => /^B2B/i.test(bt||"");
+          const isD2CInv = bt => /^(D2C|B2C)/i.test(bt||"") && !/^B2B/i.test(bt||"");
 
-          // D2C revenue — Closed+Overdue invoices where type is D2C/B2C (NOT B2B, NOT Grants)
-          const isD2C = bt => /^(D2C|B2C)/i.test(bt) && !/^B2B/i.test(bt);
+          const b2bRevHome = invoiceData
+            .filter(r => isB2BInv(r.businessType||r.type||""))
+            .filter(r => ["Closed","Overdue"].includes(r.status))
+            .filter(r => inOvRange(r.yearMonth ? r.yearMonth+"-01" : null))
+            .reduce((s,r) => s+r.subtotal, 0);
+
           const d2cRevHome = invoiceData
-            .filter(r => isD2C(r.businessType||r.type||""))
-            .filter(r => selMonths.length===0||selMonths.includes(r.yearMonth||r.month))
-            .reduce((s,r)=>s+r.subtotal,0);
+            .filter(r => isD2CInv(r.businessType||r.type||""))
+            .filter(r => ["Closed","Overdue"].includes(r.status))
+            .filter(r => inOvRange(r.yearMonth ? r.yearMonth+"-01" : null))
+            .reduce((s,r) => s+r.subtotal, 0);
 
-          // D2C ROAS — D2C revenue / total ad spend
-          const d2cROAS = d2cRevHome>0&&tSpend>0?parseFloat((d2cRevHome/tSpend).toFixed(2)):0;
+          // ── CRM filtered by overview date (closing date) ──────────────────────
+          const crmB2BWon  = crmData.filter(r => r.isB2B && r.stageClass==="closedWon"  && inOvRange(r.closing));
+          const crmB2BFA   = crmData.filter(r => r.isB2B && r.stageClass==="lostFA"     && inOvRange(r.closing));
+          const crmB2BLost = crmData.filter(r => r.isB2B && r.stageClass==="closedLost" && inOvRange(r.closing));
+
+          // ── ROAS formulas ─────────────────────────────────────────────────────
+          // B2B ROAS = B2B Invoice Revenue / Total Ad Spend
+          // D2C ROAS = D2C Invoice Revenue / Total Ad Spend
+          const trueROASHome = b2bRevHome>0&&tSpend>0 ? parseFloat((b2bRevHome/tSpend).toFixed(2)) : 0;
+          const d2cROAS      = d2cRevHome>0&&tSpend>0 ? parseFloat((d2cRevHome/tSpend).toFixed(2)) : 0;
+
+          const rc=r=>r>=4?"#15803d":r>=2?C.accent:r>=1?"#d97706":r>0?C.down:C.muted;
           const kpis=[
-            {label:"Total Invoiced Revenue",val:fmtINR(b2bRevHome),sub:"B2B · Closed+Overdue",primary:true,click:()=>setPage("invoices")},
-            {label:"Total D2C Revenue",val:fmtINR(d2cRevHome),sub:"Shopify · Amazon · B2C Offline",col:"#0a66c2",click:()=>setPage("invoices")},
-            {label:"Total Ad Spend",val:fmtINR(tSpend),sub:"Meta + LinkedIn + Google",col:C.primary,click:()=>setPage("ads")},
-            {label:"B2B ROAS",val:trueROASHome>0?`${trueROASHome}x`:"—",sub:trueROASHome>=2?"Good":trueROASHome>=1?"Break-even":trueROASHome>0?"Below BE":"Upload both",col:rc(trueROASHome)},
-            {label:"D2C ROAS",val:d2cROAS>0?`${d2cROAS}x`:"—",sub:d2cROAS>=2?"Good":d2cROAS>=1?"Break-even":d2cROAS>0?"Below BE":"Upload both",col:rc(d2cROAS)},
+            {label:"B2B Revenue",       val:fmtINR(b2bRevHome),  sub:"Closed+Overdue · B2B invoices",       primary:true, click:()=>setPage("invoices")},
+            {label:"D2C Revenue",        val:fmtINR(d2cRevHome),  sub:"Shopify · Amazon · B2C Offline",      col:"#0a66c2",click:()=>setPage("invoices")},
+            {label:"Total Ad Spend",     val:fmtINR(tSpend),      sub:"Meta + LinkedIn + Google",            col:C.primary,click:()=>setPage("ads")},
+            {label:"B2B ROAS",           val:trueROASHome>0?`${trueROASHome}x`:"—", sub:trueROASHome>=4?"Excellent":trueROASHome>=2?"Good":trueROASHome>=1?"Break-even":trueROASHome>0?"Below BE":"Need invoice+ad data", col:rc(trueROASHome)},
+            {label:"D2C ROAS",           val:d2cROAS>0?`${d2cROAS}x`:"—",          sub:d2cROAS>=4?"Excellent":d2cROAS>=2?"Good":d2cROAS>=1?"Break-even":d2cROAS>0?"Below BE":"Need invoice+ad data",                      col:rc(d2cROAS)},
+            {label:"Closed Won (CRM)",   val:String(crmB2BWon.length),  sub:crmB2BWon.reduce((s,r)=>s+r.amount,0)>0?fmtINR(crmB2BWon.reduce((s,r)=>s+r.amount,0))+" won":"B2B · by closing date",  col:"#16a34a", click:()=>setPage("crm")},
+            {label:"Lost (FA)",          val:String(crmB2BFA.length),   sub:"Closed Lost Internal FA",        col:"#f59e0b", click:()=>setPage("crm")},
+            {label:"Closed Lost",        val:String(crmB2BLost.length), sub:"B2B · by closing date",          col:C.down,   click:()=>setPage("crm")},
           ];
           return(
           <div style={{display:"flex",flexDirection:"column",gap:16}}>
@@ -1601,11 +1604,21 @@ export default function App() {
                 <div style={{fontSize:10,color:C.muted,textTransform:"uppercase",letterSpacing:2,fontWeight:700,marginBottom:2}}>Without® · Marketing Intelligence</div>
                 <h1 style={{fontSize:20,fontWeight:800,letterSpacing:-0.5}}>Overview</h1>
               </div>
-              <div style={{display:"flex",alignItems:"center",gap:8}}>
-                <div style={{display:"flex",alignItems:"center",gap:5}}>
-                  <div style={{width:6,height:6,borderRadius:"50%",background:hasLive||invoiceData.length||crmData.length?"#22c55e":"#f59e0b"}}/>
-                  <span style={{fontSize:11,color:C.muted}}>{[hasLive&&"Ads",invoiceData.length&&"Invoices",crmData.length&&"CRM"].filter(Boolean).join(" · ")||"No data"}</span>
+              <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                {/* Date filter */}
+                <div style={{display:"flex",alignItems:"center",gap:6,background:C.card,border:`1px solid ${C.border}`,borderRadius:10,padding:"5px 12px",boxShadow:"0 1px 4px rgba(45,45,78,0.06)"}}>
+                  <span style={{fontSize:10,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>Period</span>
+                  <input type="date" value={ovFrom} onChange={e=>setOvFrom(e.target.value)}
+                    style={{border:"none",background:"transparent",fontSize:11,color:C.text,outline:"none",cursor:"pointer",fontFamily:"inherit"}}/>
+                  <span style={{fontSize:11,color:C.muted}}>to</span>
+                  <input type="date" value={ovTo} onChange={e=>setOvTo(e.target.value)}
+                    style={{border:"none",background:"transparent",fontSize:11,color:C.text,outline:"none",cursor:"pointer",fontFamily:"inherit"}}/>
+                  {(ovFrom||ovTo)&&(
+                    <button onClick={()=>{setOvFrom("");setOvTo("");}}
+                      style={{background:"none",border:"none",color:C.muted,cursor:"pointer",fontSize:12,padding:"0 2px",fontWeight:700}}>✕</button>
+                  )}
                 </div>
+                {/* Sync button */}
                 <button onClick={syncZoho} disabled={zohoSyncing}
                   style={{background:zohoSyncing?"rgba(45,45,78,0.1)":C.primary,color:zohoSyncing?C.muted:"#fff",
                     border:"none",borderRadius:8,padding:"6px 14px",fontSize:11,fontWeight:700,cursor:zohoSyncing?"not-allowed":"pointer",
@@ -1614,9 +1627,14 @@ export default function App() {
                     ? <><span style={{display:"inline-block",animation:"spin 1s linear infinite"}}>⟳</span> Syncing...</>
                     : <><span>⚡</span> Sync Now</>}
                 </button>
+                {/* Data status */}
+                <div style={{display:"flex",alignItems:"center",gap:5}}>
+                  <div style={{width:6,height:6,borderRadius:"50%",background:hasLive||invoiceData.length||crmData.length?"#22c55e":"#f59e0b"}}/>
+                  <span style={{fontSize:11,color:C.muted}}>{[hasLive&&"Ads",invoiceData.length&&"Inv",crmData.length&&"CRM"].filter(Boolean).join(" · ")||"No data"}</span>
+                </div>
                 {zohoLastSync&&<span style={{fontSize:10,color:C.muted}}>Last: {zohoLastSync}</span>}
                 {zohoSyncStatus&&typeof zohoSyncStatus==="string"&&(
-                  <span style={{fontSize:10,color:C.accent,fontWeight:600}}>{zohoSyncStatus}</span>
+                  <div style={{fontSize:10,color:C.accent,fontWeight:600,maxWidth:300,lineHeight:1.4}}>{zohoSyncStatus}</div>
                 )}
               </div>
             </div>
@@ -1775,14 +1793,17 @@ export default function App() {
                   <div style={{width:1,height:16,background:C.border}}/>
                   <span style={{fontSize:10,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>Channel</span>
                   {["all","Meta","LinkedIn","Google"].map(ch=>{
-                    const hasData=ch==="all"||liveData[ch.toLowerCase()]?.length>0;
-                    if(!hasData) return null;
+                    const hasData = ch==="all" || liveData[ch.toLowerCase()]?.length>0;
                     return(
                       <button key={ch} className={`cb${activeChan===ch?" on":""}`}
                         onClick={()=>setActiveChan(ch)}
-                        style={{background:"none",border:`1px solid ${C.border}`,borderRadius:6,color:ch==="all"?C.sub:srcColor(ch),fontSize:11,fontWeight:600,padding:"3px 11px",display:"flex",alignItems:"center",gap:4}}>
-                        {ch!=="all"&&<div style={{width:6,height:6,borderRadius:"50%",background:srcColor(ch)}}/>}
+                        style={{background:"none",border:`1px solid ${hasData?C.border:C.border+'55'}`,borderRadius:6,
+                          color:ch==="all"?C.sub:hasData?srcColor(ch):C.muted,
+                          fontSize:11,fontWeight:600,padding:"3px 11px",display:"flex",alignItems:"center",gap:4,
+                          opacity:hasData?1:0.45}}>
+                        {ch!=="all"&&<div style={{width:6,height:6,borderRadius:"50%",background:hasData?srcColor(ch):C.muted}}/>}
                         {ch==="all"?"All":ch}
+                        {!hasData&&ch!=="all"&&<span style={{fontSize:8,color:C.muted}}> —</span>}
                       </button>
                     );
                   })}
@@ -2029,9 +2050,9 @@ export default function App() {
                             <td style={{padding:"7px 8px"}}><div style={{display:"flex",alignItems:"center",gap:6}}><div style={{width:7,height:7,borderRadius:"50%",background:ch.color}}/><span style={{fontWeight:700,color:ch.color}}>{ch.ch}</span></div></td>
                             <td style={{padding:"7px 8px",fontFamily:"'DM Mono',monospace",fontWeight:600}}>{fmtINR(ch.spend)}</td>
                             <td style={{padding:"7px 8px",color:C.sub}}>{ch.leads||"—"}</td>
-                            <td style={{padding:"7px 8px"}}><span style={{background:ch.cpl>0&&ch.cpl<1000?`${C.accent}12`:ch.cpl>0?"#fef2f2":C.cardAlt,color:ch.cpl>0&&ch.cpl<1000?C.accent:ch.cpl>0?C.down:C.muted,fontFamily:"'DM Mono',monospace",fontWeight:700,padding:"2px 6px",borderRadius:4,fontSize:10.5}}>{ch.cpl?`₹${ch.cpl}`:"—"}</span></td>
+                            <td style={{padding:"7px 8px"}}><span style={{background:ch.cpl>0&&ch.cpl<1000?`${C.accent}12`:ch.cpl>0?"#fef2f2":C.cardAlt,color:ch.cpl>0&&ch.cpl<1000?C.accent:ch.cpl>0?C.down:C.muted,fontFamily:"'DM Mono',monospace",fontWeight:700,padding:"2px 6px",borderRadius:4,fontSize:10.5}}>{ch.cpl?fmtINR(ch.cpl):"—"}</span></td>
                             <td style={{padding:"7px 8px",color:C.sub}}>{ch.ctr?`${ch.ctr}%`:"—"}</td>
-                            <td style={{padding:"7px 8px",fontFamily:"'DM Mono',monospace",color:C.sub}}>{ch.cpc?`₹${ch.cpc}`:"—"}</td>
+                            <td style={{padding:"7px 8px",fontFamily:"'DM Mono',monospace",color:C.sub}}>{ch.cpc?fmtINR(ch.cpc):"—"}</td>
                           </tr>
                         ))}
                       </tbody>
