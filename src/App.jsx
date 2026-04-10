@@ -908,22 +908,21 @@ export default function App() {
     const results = [];
     const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
-    // ── Helper: parse date from various formats ──────────────────────────────
+    // ── Helper: parse date — handles DD/MM/YYYY, YYYY-MM-DD, DD/MM/YYYY HH:MM AM/PM
     const parseDate = s => {
       if(!s) return '';
-      // DD/MM/YYYY HH:MM or DD/MM/YYYY
-      const m1 = s.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+      const m1 = String(s).match(/^(\d{2})\/(\d{2})\/(\d{4})/);
       if(m1) return `${m1[3]}-${m1[2]}-${m1[1]}`;
-      // YYYY-MM-DD
-      const m2 = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+      const m2 = String(s).match(/^(\d{4})-(\d{2})-(\d{2})/);
       if(m2) return s.slice(0,10);
-      return s.slice(0,10);
+      return '';
     };
 
-    // ── Helper: parse INR amount ─────────────────────────────────────────────
+    // ── Helper: parse INR amount — handles "₹ 20,000.00", "INR 1,025,000.00", "1025000"
     const parseAmt = s => {
       if(!s) return 0;
-      return parseFloat(String(s).replace(/[₹,\s]/g,''))||0;
+      const clean = String(s).replace(/INR|₹|,|\s/g,'').replace(/K$/i, '000').trim();
+      return parseFloat(clean)||0;
     };
 
     try {
@@ -939,9 +938,11 @@ export default function App() {
           const type    = d['Deal Type - B2B B2C etc'] || '';
           const stage   = d['Stage'] || '';
           const owner   = d['Deal Owner Name'] || '';
-          const amount  = parseAmt(d['Amount']);
+          const amount  = parseAmt(d['Amount'] || '0');
+          // Closing Date: "28/02/2023" (DD/MM/YYYY)
           const closing = parseDate(d['Closing Date'] || '');
-          const created = parseDate((d['Created Time'] || '').split(' ')[0]);
+          // Created Time: "23/02/2023 11:45 AM" (DD/MM/YYYY HH:MM AM/PM)
+          const created = parseDate(d['Created Time'] || '');
           const isB2B   = /^B2B/i.test(type);
           let stageClass;
           if(stage==='Closed Won') stageClass='closedWon';
@@ -966,18 +967,23 @@ export default function App() {
         const rows = Array.isArray(invJson.data) ? invJson.data : [];
         const seen2 = new Set();
         const parsed2 = rows.map(inv => {
-          // Analytics Invoices table columns
-          const invNum  = inv['Invoice Number'] || inv['invoice_number'] || inv['invoice_id'] || '';
+          // Exact column names from Zoho Analytics "Invoices (Zoho Books)" view
+          const invNum  = inv['Invoice Number'] || '';
           if(!invNum || seen2.has(invNum)) return null; seen2.add(invNum);
-          const statusRaw = (inv['Invoice Status'] || inv['status'] || '').toLowerCase();
-          const status = statusRaw==='paid'||statusRaw==='closed'?'Closed':statusRaw==='overdue'||statusRaw==='unpaid'?'Overdue':null;
+          // Use "Invoice Status" column — values are "Closed", "Overdue", "Draft" etc.
+          const statusRaw = (inv['Invoice Status'] || inv['Status'] || '').toLowerCase().trim();
+          const status = statusRaw==='closed'?'Closed':statusRaw==='overdue'?'Overdue':null;
           if(!status) return null;
-          const bizType = inv['CF.Business Type'] || inv['cf_business_type'] || inv['Business Type'] || '';
-          if(/^grant/i.test(bizType) || bizType.length<2) return null;
-          const subtotal = parseAmt(inv['SubTotal'] || inv['total'] || inv['Amount'] || '0');
-          const balance  = parseAmt(inv['Balance'] || inv['balance'] || '0');
-          const customer = inv['Customer Name'] || inv['customer_name'] || '';
-          const dateStr  = (inv['Invoice Date'] || inv['date'] || '').split(' ')[0];
+          // "Business Type" column (not CF.Business Type in Analytics view)
+          const bizType = (inv['Business Type'] || '').trim();
+          if(/^grant/i.test(bizType) || bizType.length < 2) return null;
+          // "Sub Total (BCY)" — format: "INR 1,025,000.00"
+          const subtotal = parseAmt(inv['Sub Total (BCY)'] || inv['SubTotal'] || '0');
+          // "Balance (BCY)" — format: "INR 0.00"
+          const balance  = parseAmt(inv['Balance (BCY)'] || inv['Balance'] || '0');
+          const customer = inv['Customer ID'] || '';
+          // "Invoice Date" — format: "11/10/2022" (DD/MM/YYYY)
+          const dateStr  = (inv['Invoice Date'] || '').split(' ')[0];
           const normDate = parseDate(dateStr);
           const yearMonth = normDate.slice(0,7) || '—';
           let month = '—';
