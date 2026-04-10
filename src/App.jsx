@@ -906,67 +906,171 @@ export default function App() {
   const syncZoho = async () => {
     setZohoSyncing(true); setZohoSyncStatus(null);
     const results = [];
+    const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+
+    // ── Helper: parse date from various formats ──────────────────────────────
+    const parseDate = s => {
+      if(!s) return '';
+      // DD/MM/YYYY HH:MM or DD/MM/YYYY
+      const m1 = s.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+      if(m1) return `${m1[3]}-${m1[2]}-${m1[1]}`;
+      // YYYY-MM-DD
+      const m2 = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if(m2) return s.slice(0,10);
+      return s.slice(0,10);
+    };
+
+    // ── Helper: parse INR amount ─────────────────────────────────────────────
+    const parseAmt = s => {
+      if(!s) return 0;
+      return parseFloat(String(s).replace(/[₹,\s]/g,''))||0;
+    };
+
     try {
-      // ── Sync CRM ───────────────────────────────────────────────────────────
-      const crmRes = await fetch('/api/zoho?source=crm');
+      // ── 1. CRM from Zoho Analytics ─────────────────────────────────────────
+      const crmRes  = await fetch('/api/zoho?source=crm');
       const crmJson = await crmRes.json();
       if(crmJson.success && crmJson.data) {
-        // Convert Zoho CRM API format to dashboard format
+        const rows = Array.isArray(crmJson.data) ? crmJson.data : [];
         const seen = new Set();
-        const parsed = crmJson.data.map(d => {
-          const id = d.id || `crm_${Math.random()}`;
+        const parsed = rows.map(d => {
+          const id = d['Id'] || `crm_${Math.random()}`;
           if(seen.has(id)) return null; seen.add(id);
-          const type     = d.Deal_Type_B2B_B2C_etc || '';
-          const stage    = d.Stage || '';
-          const owner    = d.Owner?.name || '';
-          const amount   = parseFloat(d.Amount||0)||0;
-          const closing  = (d.Closing_Date||'').slice(0,10);
-          const created  = (d.Created_Time||'').slice(0,10);
-          const isB2B    = /^B2B/i.test(type);
+          const type    = d['Deal Type - B2B B2C etc'] || '';
+          const stage   = d['Stage'] || '';
+          const owner   = d['Deal Owner Name'] || '';
+          const amount  = parseAmt(d['Amount']);
+          const closing = parseDate(d['Closing Date'] || '');
+          const created = parseDate((d['Created Time'] || '').split(' ')[0]);
+          const isB2B   = /^B2B/i.test(type);
           let stageClass;
           if(stage==='Closed Won') stageClass='closedWon';
           else if(stage==='Closed Lost (Internal Issues FA)') stageClass='lostFA';
           else if(stage==='Closed Lost') stageClass='closedLost';
           else stageClass='active';
-          let closingMonth=null,closingYear=null;
-          if(closing&&closing.length>=7){
+          let closingMonth=null, closingYear=null;
+          if(closing && closing.length>=7){
             const mi=parseInt(closing.slice(5,7),10)-1;
-            if(mi>=0&&mi<=11){closingMonth=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][mi];closingYear=parseInt(closing.slice(0,4),10);}
+            if(mi>=0&&mi<=11){closingMonth=MONTHS[mi]; closingYear=parseInt(closing.slice(0,4),10);}
           }
-          return {id,name:d.Deal_Name||'',account:d.Account_Name?.name||'',type,stage,stageClass,owner,amount,closing,created,closingMonth,closingYear,isB2B};
+          return {id, name:d['Deal Name']||'', account:d['Account Name']||'', type, stage, stageClass, owner, amount, closing, created, closingMonth, closingYear, isB2B};
         }).filter(Boolean);
         setCrmData(parsed);
-        results.push(`✅ CRM: ${parsed.length} deals synced`);
-      } else { results.push(`⚠️ CRM sync failed`); }
+        results.push(`✅ CRM: ${parsed.length} deals`);
+      } else results.push(`⚠️ CRM failed`);
 
-      // ── Sync Invoices ──────────────────────────────────────────────────────
-      const invRes = await fetch('/api/zoho?source=invoices');
+      // ── 2. Invoices from Zoho Analytics ────────────────────────────────────
+      const invRes  = await fetch('/api/zoho?source=invoices');
       const invJson = await invRes.json();
       if(invJson.success && invJson.data) {
+        const rows = Array.isArray(invJson.data) ? invJson.data : [];
         const seen2 = new Set();
-        const parsed2 = invJson.data.map(inv => {
-          const invNum = inv.invoice_number||inv.invoice_id;
-          if(!invNum||seen2.has(invNum)) return null; seen2.add(invNum);
-          const status = inv.status==='paid'?'Closed':inv.status==='overdue'?'Overdue':inv.status==='unpaid'?'Overdue':null;
-          if(!['Closed','Overdue'].includes(status)) return null;
-          const bizType = inv.cf_business_type||inv.custom_field_hash?.cf_business_type||'';
-          if(/^grant/i.test(bizType)||bizType.length<2) return null;
-          const subtotal = parseFloat(inv.total||0)||0;
-          const balance  = parseFloat(inv.balance||0)||0;
-          const customer = inv.customer_name||'';
-          const dateStr  = inv.date||'';
-          // toMonth logic
-          const ML={jan:"Jan",feb:"Feb",mar:"Mar",apr:"Apr",may:"May",jun:"Jun",jul:"Jul",aug:"Aug",sep:"Sep",oct:"Oct",nov:"Nov",dec:"Dec"};
-          let month="—", yearMonth=dateStr.slice(0,7)||"—";
-          if(dateStr&&dateStr.length>=7){const mi=parseInt(dateStr.slice(5,7),10)-1;const names=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];month=names[mi]||"—";}
-          return {invoiceNumber:invNum,month,yearMonth,status,businessType:bizType,subtotal,balance,customer};
+        const parsed2 = rows.map(inv => {
+          // Analytics Invoices table columns
+          const invNum  = inv['Invoice Number'] || inv['invoice_number'] || inv['invoice_id'] || '';
+          if(!invNum || seen2.has(invNum)) return null; seen2.add(invNum);
+          const statusRaw = (inv['Invoice Status'] || inv['status'] || '').toLowerCase();
+          const status = statusRaw==='paid'||statusRaw==='closed'?'Closed':statusRaw==='overdue'||statusRaw==='unpaid'?'Overdue':null;
+          if(!status) return null;
+          const bizType = inv['CF.Business Type'] || inv['cf_business_type'] || inv['Business Type'] || '';
+          if(/^grant/i.test(bizType) || bizType.length<2) return null;
+          const subtotal = parseAmt(inv['SubTotal'] || inv['total'] || inv['Amount'] || '0');
+          const balance  = parseAmt(inv['Balance'] || inv['balance'] || '0');
+          const customer = inv['Customer Name'] || inv['customer_name'] || '';
+          const dateStr  = (inv['Invoice Date'] || inv['date'] || '').split(' ')[0];
+          const normDate = parseDate(dateStr);
+          const yearMonth = normDate.slice(0,7) || '—';
+          let month = '—';
+          if(normDate.length>=7){const mi=parseInt(normDate.slice(5,7),10)-1; if(mi>=0&&mi<=11) month=MONTHS[mi];}
+          return {invoiceNumber:invNum, month, yearMonth, status, businessType:bizType, subtotal, balance, customer};
         }).filter(Boolean);
         setInvoiceData(parsed2);
         results.push(`✅ Invoices: ${parsed2.length} synced`);
-      } else { results.push(`⚠️ Invoice sync failed`); }
+      } else results.push(`⚠️ Invoices failed`);
+
+      // ── 3. Meta Ads from Zoho Analytics ────────────────────────────────────
+      const metaRes  = await fetch('/api/zoho?source=meta');
+      const metaJson = await metaRes.json();
+      if(metaJson.success && metaJson.data) {
+        const rows = Array.isArray(metaJson.data) ? metaJson.data : [];
+        const byMonth = {};
+        rows.forEach(r => {
+          const dateRaw = r['Date'] || r['date'] || r['Reporting starts'] || '';
+          const normDate = parseDate(dateRaw);
+          const mi = normDate.length>=7 ? parseInt(normDate.slice(5,7),10)-1 : -1;
+          const month = mi>=0&&mi<=11 ? MONTHS[mi] : null;
+          const yearMonth = normDate.slice(0,7) || null;
+          if(!month) return;
+          const key = yearMonth || month;
+          if(!byMonth[key]) byMonth[key] = {month, yearMonth:key, spend:0, impressions:0, clicks:0, leads:0, reach:0};
+          byMonth[key].spend       += parseAmt(r['Amount Spent'] || r['Spend'] || r['spend'] || '0');
+          byMonth[key].impressions += parseFloat(r['Impressions']||'0')||0;
+          byMonth[key].clicks      += parseFloat(r['Clicks']||r['Link Clicks']||'0')||0;
+          byMonth[key].leads       += parseFloat(r['Leads']||r['Results']||'0')||0;
+          byMonth[key].reach       += parseFloat(r['Reach']||'0')||0;
+        });
+        const monthly = Object.values(byMonth).sort((a,b)=>a.yearMonth.localeCompare(b.yearMonth));
+        if(monthly.length>0){
+          setLive(prev => ({...prev, meta: monthly}));
+          results.push(`✅ Meta: ${monthly.length} months`);
+        } else results.push(`⚠️ Meta: no spend data found`);
+      } else results.push(`⚠️ Meta failed`);
+
+      // ── 4. LinkedIn Ads from Zoho Analytics ────────────────────────────────
+      const liRes  = await fetch('/api/zoho?source=linkedin');
+      const liJson = await liRes.json();
+      if(liJson.success && liJson.data) {
+        const rows = Array.isArray(liJson.data) ? liJson.data : [];
+        const byMonth = {};
+        rows.forEach(r => {
+          const dateRaw = r['Start Date'] || r['Date'] || r['date'] || '';
+          const normDate = parseDate(dateRaw);
+          const mi = normDate.length>=7 ? parseInt(normDate.slice(5,7),10)-1 : -1;
+          const month = mi>=0&&mi<=11 ? MONTHS[mi] : null;
+          const yearMonth = normDate.slice(0,7) || null;
+          if(!month) return;
+          const key = yearMonth || month;
+          if(!byMonth[key]) byMonth[key] = {month, yearMonth:key, spend:0, impressions:0, clicks:0, leads:0, reach:0};
+          byMonth[key].spend       += parseAmt(r['Total Spent'] || r['Amount Spent'] || r['Spend'] || r['spend'] || '0');
+          byMonth[key].impressions += parseFloat(r['Impressions']||'0')||0;
+          byMonth[key].clicks      += parseFloat(r['Clicks']||'0')||0;
+          byMonth[key].leads       += parseFloat(r['Leads']||r['Conversions']||'0')||0;
+        });
+        const monthly = Object.values(byMonth).sort((a,b)=>a.yearMonth.localeCompare(b.yearMonth));
+        if(monthly.length>0){
+          setLive(prev => ({...prev, linkedin: monthly}));
+          results.push(`✅ LinkedIn: ${monthly.length} months`);
+        } else results.push(`⚠️ LinkedIn: no spend data found`);
+      } else results.push(`⚠️ LinkedIn failed`);
+
+      // ── 5. Google Ads from Zoho Analytics ──────────────────────────────────
+      const gRes  = await fetch('/api/zoho?source=google');
+      const gJson = await gRes.json();
+      if(gJson.success && gJson.data) {
+        const rows = Array.isArray(gJson.data) ? gJson.data : [];
+        const byMonth = {};
+        rows.forEach(r => {
+          const dateRaw = r['Date'] || r['Day'] || r['date'] || '';
+          const normDate = parseDate(dateRaw);
+          const mi = normDate.length>=7 ? parseInt(normDate.slice(5,7),10)-1 : -1;
+          const month = mi>=0&&mi<=11 ? MONTHS[mi] : null;
+          const yearMonth = normDate.slice(0,7) || null;
+          if(!month) return;
+          const key = yearMonth || month;
+          if(!byMonth[key]) byMonth[key] = {month, yearMonth:key, spend:0, impressions:0, clicks:0, leads:0, reach:0};
+          byMonth[key].spend       += parseAmt(r['Cost'] || r['Spend'] || r['spend'] || '0');
+          byMonth[key].impressions += parseFloat(r['Impressions']||'0')||0;
+          byMonth[key].clicks      += parseFloat(r['Clicks']||'0')||0;
+          byMonth[key].leads       += parseFloat(r['Conversions']||r['Leads']||'0')||0;
+        });
+        const monthly = Object.values(byMonth).sort((a,b)=>a.yearMonth.localeCompare(b.yearMonth));
+        if(monthly.length>0){
+          setLive(prev => ({...prev, google: monthly}));
+          results.push(`✅ Google: ${monthly.length} months`);
+        } else results.push(`⚠️ Google: no spend data found`);
+      } else results.push(`⚠️ Google failed`);
 
       setZohoLastSync(new Date().toLocaleString('en-IN'));
-      setZohoSyncStatus('success');
       setZohoSyncStatus(results.join(' · '));
     } catch(err) {
       setZohoSyncStatus('❌ Error: ' + err.message);
