@@ -1478,7 +1478,6 @@ export default function App() {
     {id:"crm",     icon:"◈",  label:"Revenue"},
     {id:"invoices",icon:"₹",  label:"Invoices"},
     {id:"estimate",icon:"◎",  label:"Estimate"},
-    {id:"upload",  icon:"⚡",  label:"Sync"},
   ];
 
   const now = new Date();
@@ -1599,9 +1598,23 @@ export default function App() {
                 <div style={{fontSize:10,color:C.muted,textTransform:"uppercase",letterSpacing:2,fontWeight:700,marginBottom:2}}>Without® · Marketing Intelligence</div>
                 <h1 style={{fontSize:20,fontWeight:800,letterSpacing:-0.5}}>Overview</h1>
               </div>
-              <div style={{display:"flex",alignItems:"center",gap:5}}>
-                <div style={{width:6,height:6,borderRadius:"50%",background:hasLive||invoiceData.length||crmData.length?"#22c55e":"#f59e0b"}}/>
-                <span style={{fontSize:11,color:C.muted}}>{[hasLive&&"Ads",invoiceData.length&&"Invoices",crmData.length&&"CRM"].filter(Boolean).join(" · ")||"No data"}</span>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <div style={{display:"flex",alignItems:"center",gap:5}}>
+                  <div style={{width:6,height:6,borderRadius:"50%",background:hasLive||invoiceData.length||crmData.length?"#22c55e":"#f59e0b"}}/>
+                  <span style={{fontSize:11,color:C.muted}}>{[hasLive&&"Ads",invoiceData.length&&"Invoices",crmData.length&&"CRM"].filter(Boolean).join(" · ")||"No data"}</span>
+                </div>
+                <button onClick={syncZoho} disabled={zohoSyncing}
+                  style={{background:zohoSyncing?"rgba(45,45,78,0.1)":C.primary,color:zohoSyncing?C.muted:"#fff",
+                    border:"none",borderRadius:8,padding:"6px 14px",fontSize:11,fontWeight:700,cursor:zohoSyncing?"not-allowed":"pointer",
+                    display:"flex",alignItems:"center",gap:5,transition:"all .2s"}}>
+                  {zohoSyncing
+                    ? <><span style={{display:"inline-block",animation:"spin 1s linear infinite"}}>⟳</span> Syncing...</>
+                    : <><span>⚡</span> Sync Now</>}
+                </button>
+                {zohoLastSync&&<span style={{fontSize:10,color:C.muted}}>Last: {zohoLastSync}</span>}
+                {zohoSyncStatus&&typeof zohoSyncStatus==="string"&&(
+                  <span style={{fontSize:10,color:C.accent,fontWeight:600}}>{zohoSyncStatus}</span>
+                )}
               </div>
             </div>
 
@@ -1746,8 +1759,7 @@ export default function App() {
               <div style={{background:C.card,border:`2px dashed ${C.border}`,borderRadius:14,padding:"52px 24px",textAlign:"center",display:"flex",flexDirection:"column",alignItems:"center",gap:12}}>
                 <div style={{fontSize:32}}>📊</div>
                 <div style={{fontWeight:700,fontSize:15,color:C.text}}>No ad spend data yet</div>
-                <div style={{fontSize:12.5,color:C.muted,maxWidth:400,lineHeight:1.7}}>Upload Meta, LinkedIn, or Google Ads exports — CSV, XLSX, PDF, any encoding.</div>
-                <button onClick={()=>setPage("upload")} style={{background:C.accent,color:"#fff",border:"none",borderRadius:9,padding:"9px 22px",fontSize:12.5,fontWeight:700,cursor:"pointer"}}>Go to Upload →</button>
+                <div style={{fontSize:12.5,color:C.muted,maxWidth:400,lineHeight:1.7}}>Click <b>⚡ Sync Now</b> on the Overview tab to pull live ad spend data from Meta, LinkedIn, and Google.</div>
               </div>
             )}
 
@@ -2176,113 +2188,7 @@ export default function App() {
         )}
 
         {/* ══ UPLOAD ════════════════════════════════════════════════════════ */}
-        {page==="upload"&&(
-          <div style={{display:"flex",flexDirection:"column",gap:20,maxWidth:"100%"}}>
 
-            {/* ── Zoho Live Sync Card ─────────────────────────────────── */}
-            <div style={{background:C.primary,borderRadius:18,padding:"20px 24px",boxShadow:"0 4px 20px rgba(45,45,78,0.2)"}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12}}>
-                <div>
-                  <div style={{fontSize:11,color:"rgba(255,255,255,0.6)",textTransform:"uppercase",letterSpacing:1.5,fontWeight:700,marginBottom:4}}>Auto Sync</div>
-                  <div style={{fontSize:18,fontWeight:800,color:"#fff",marginBottom:4}}>Zoho CRM + Books</div>
-                  <div style={{fontSize:12,color:"rgba(255,255,255,0.6)"}}>
-                    {zohoLastSync ? `Last synced: ${zohoLastSync}` : "Never synced — click to pull live data"}
-                  </div>
-                  {zohoSyncStatus&&typeof zohoSyncStatus==="string"&&(
-                    <div style={{marginTop:8,fontSize:11,color:"rgba(255,255,255,0.8)",background:"rgba(255,255,255,0.1)",borderRadius:8,padding:"6px 12px",display:"inline-block"}}>{zohoSyncStatus}</div>
-                  )}
-                </div>
-                <button onClick={syncZoho} disabled={zohoSyncing}
-                  style={{background:zohoSyncing?"rgba(255,255,255,0.2)":"#b5e550",color:zohoSyncing?"rgba(255,255,255,0.6)":"#1a1f18",
-                    border:"none",borderRadius:12,padding:"12px 28px",fontSize:14,fontWeight:800,cursor:zohoSyncing?"not-allowed":"pointer",
-                    display:"flex",alignItems:"center",gap:8,transition:"all .2s",boxShadow:zohoSyncing?"none":"0 4px 14px rgba(181,229,80,0.3)"}}>
-                  {zohoSyncing
-                    ? <><span style={{display:"inline-block",animation:"spin 1s linear infinite"}}>⟳</span> Syncing...</>
-                    : <><span>⚡</span> Sync Now</>}
-                </button>
-              </div>
-            </div>
-
-            <div>
-              <div style={{fontSize:10,color:C.muted,textTransform:"uppercase",letterSpacing:2,fontWeight:700,marginBottom:2}}>Data Input</div>
-              <h1 style={{fontSize:22,fontWeight:800,letterSpacing:-0.5}}>Upload Ad Spend Data</h1>
-              <p style={{fontSize:12.5,color:C.muted,marginTop:6,lineHeight:1.7}}>Drop <b style={{color:C.text}}>any number of files</b> — 20 months of Meta exports, full-year LinkedIn, multiple Google reports — all at once. <b style={{color:C.text}}>CSV, XLSX, PDF, TXT, TSV</b>, any encoding. Each month is deduplicated automatically — uploading the same file twice won't double-count. Bad files are skipped with a warning, good files still import.</p>
-            </div>
-            {!libsReady&&<div style={{background:"#fff8e1",border:"1px solid #ffe082",borderRadius:9,padding:"7px 10px",fontSize:11.5,color:"#b45309",display:"flex",gap:7,alignItems:"center"}}><span style={{display:"inline-block",animation:"spin 1s linear infinite"}}>⟳</span> Loading parsing libraries…</div>}
-            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:11}}>
-              <UploadBox source="Meta Ads"     color={C.meta}   logo="f"  files={files.meta}     onAddFiles={f=>setFiles(p=>({...p,meta:[...p.meta,...f]}))}     onDeleteFile={i=>setFiles(p=>({...p,meta:p.meta.filter((_,j)=>j!==i)}))}/>
-              <UploadBox source="LinkedIn Ads" color={C.li}     logo="in" files={files.linkedin} onAddFiles={f=>setFiles(p=>({...p,linkedin:[...p.linkedin,...f]}))} onDeleteFile={i=>setFiles(p=>({...p,linkedin:p.linkedin.filter((_,j)=>j!==i)}))}/>
-              <UploadBox source="Google Ads"   color={C.google} logo="G"  files={files.google}  onAddFiles={f=>setFiles(p=>({...p,google:[...p.google,...f]}))}   onDeleteFile={i=>setFiles(p=>({...p,google:p.google.filter((_,j)=>j!==i)}))}/>
-            </div>
-            {error&&<div style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:9,padding:"12px 14px",fontSize:11.5,color:"#dc2626",whiteSpace:"pre-wrap",lineHeight:1.8}}>⚠️ {error}</div>}
-            {debug&&<div style={{background:C.accentLt,border:`1px solid ${C.accent}30`,borderRadius:9,padding:"11px 14px",fontSize:11,color:C.sub,fontFamily:"'DM Mono',monospace",whiteSpace:"pre-wrap",lineHeight:1.8}}>{debug}</div>}
-            <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:11,padding:"14px 18px",display:"flex",alignItems:"center",gap:14,flexWrap:"wrap",boxShadow:"0 1px 4px rgba(0,0,0,0.05)"}}>
-              <div style={{flex:1,display:"flex",gap:8,flexWrap:"wrap"}}>
-                {[{k:"meta",l:"Meta",c:C.meta,f:files.meta},{k:"linkedin",l:"LinkedIn",c:C.li,f:files.linkedin},{k:"google",l:"Google",c:C.google,f:files.google}].map(({k,l,c,f})=>(
-                  <div key={k} style={{display:"flex",alignItems:"center",gap:5,padding:"4px 10px",borderRadius:7,background:f.length>0?`${c}10`:C.cardAlt,border:`1px solid ${f.length>0?c+"28":C.border}`}}>
-                    <div style={{width:6,height:6,borderRadius:"50%",background:f.length>0?c:C.border}}/>
-                    <span style={{fontSize:11,fontWeight:600,color:f.length>0?c:C.muted}}>{l}</span>
-                    {f.length>0&&<span style={{fontSize:9.5,color:C.muted}}>{f.length} file{f.length!==1?"s":""}</span>}
-                  </div>
-                ))}
-              </div>
-              <button className="sub-btn" disabled={!hasFiles||!libsReady||submitting||submitted} onClick={handleSubmit}
-                style={{background:submitted?"#22c55e":hasFiles&&libsReady&&!submitting?C.accent:"#ccc",color:"#fff",border:"none",borderRadius:9,padding:"10px 24px",fontSize:13,fontWeight:800,cursor:"pointer",boxShadow:hasFiles?"0 4px 14px rgba(90,138,0,0.22)":"none",whiteSpace:"nowrap",flexShrink:0,display:"flex",alignItems:"center",gap:7}}>
-                {submitted?"✓ Done!":submitting?<><span style={{display:"inline-block",animation:"spin 1s linear infinite"}}>⟳</span> Parsing…</>:<><span style={{fontSize:15}}>↑</span> Submit Import{fileCount>1?` (${fileCount} files)`:""}</>}
-              </button>
-            </div>
-            <div style={{background:"#f0f7e4",border:`1px solid ${C.accent}28`,borderRadius:10,padding:"12px 16px",fontSize:11.5,color:C.sub,lineHeight:2}}>
-              <b style={{color:C.accent}}>Persistent & cumulative:</b> Data is saved in your browser automatically — it survives page refreshes and closing the tab. Each import <b>adds to</b> existing data. Upload January now, February next month — both stay on the dashboard until you click Clear Data.<br/>
-              <b style={{color:C.accent}}>Auto-handled:</b> CSV · XLSX · PDF (text extraction) · TSV · TXT · UTF-8 · UTF-16 LE/BE · Latin-1 · comma or tab delimiter · metadata rows skipped · ₹/$ symbols · commas in numbers · all date formats
-            </div>
-
-            {/* ── Invoice Upload Section ───────────────────────────────────── */}
-            <div style={{borderTop:`2px solid ${C.border}`,paddingTop:20,marginTop:4}}>
-              <div style={{marginBottom:12}}>
-                <div style={{fontSize:10,color:C.muted,textTransform:"uppercase",letterSpacing:2,fontWeight:700,marginBottom:2}}>Invoice Revenue</div>
-                <h2 style={{fontSize:16,fontWeight:800,letterSpacing:-0.3}}>Upload Invoice Export</h2>
-                <p style={{fontSize:12,color:C.muted,marginTop:4,lineHeight:1.7}}>Export from <b style={{color:C.text}}>Zoho Books → Invoices → Export</b> — one file per period or dump them all at once. <b style={{color:C.accent}}>Handles 20+ files in one go.</b> Deduplicates by Invoice Number across all files — the same invoice in two exports is counted once. Includes B2B + D2C/B2C, excludes Grants and Drafts. Existing data is merged, not replaced — you can upload April–June, then July–December separately.</p>
-              </div>
-              <UploadBox source="Zoho Books Invoices" color={C.accent} logo="₹"
-                files={invoiceFiles}
-                onAddFiles={f=>setInvoiceFiles(p=>[...p,...f])}
-                onDeleteFile={i=>setInvoiceFiles(p=>p.filter((_,j)=>j!==i))}/>
-              {invError&&<div style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:9,padding:"12px 14px",fontSize:11.5,color:"#dc2626",whiteSpace:"pre-wrap",lineHeight:1.8,marginTop:8}}>⚠️ {invError}</div>}
-              {invDebug&&<div style={{background:C.accentLt,border:`1px solid ${C.accent}30`,borderRadius:9,padding:"11px 14px",fontSize:11,color:C.sub,fontFamily:"'DM Mono',monospace",whiteSpace:"pre-wrap",lineHeight:1.8,marginTop:8}}>{invDebug}</div>}
-              <div style={{marginTop:10,display:"flex",justifyContent:"flex-end"}}>
-                <button className="sub-btn" disabled={!invoiceFiles.length||!libsReady||invSub||invDone} onClick={handleInvoiceSubmit}
-                  style={{background:invDone?"#22c55e":invoiceFiles.length&&libsReady&&!invSub?C.accent:"#ccc",color:"#fff",border:"none",borderRadius:9,padding:"10px 24px",fontSize:13,fontWeight:800,cursor:"pointer",display:"flex",alignItems:"center",gap:7}}>
-                  {invDone?"✓ Done!":invSub?<><span style={{display:"inline-block",animation:"spin 1s linear infinite"}}>⟳</span> Parsing…</>:<><span style={{fontSize:15}}>₹</span> Import Invoices</>}
-                </button>
-              </div>
-            </div>
-
-            {/* ── CRM Upload Section ───────────────────────────────────────── */}
-            <div style={{borderTop:`2px solid ${C.border}`,paddingTop:20,marginTop:4}}>
-              <div style={{marginBottom:12}}>
-                <div style={{fontSize:10,color:C.muted,textTransform:"uppercase",letterSpacing:2,fontWeight:700,marginBottom:2}}>CRM Pipeline</div>
-                <h2 style={{fontSize:16,fontWeight:800,letterSpacing:-0.3}}>Upload CRM Export</h2>
-                <p style={{fontSize:12,color:C.muted,marginTop:4,lineHeight:1.7}}>Export from <b style={{color:C.text}}>Zoho CRM → Deals → Export All</b>. Accepts XLS, CSV, XLSX. Each upload <b style={{color:C.accent}}>fully replaces</b> previous CRM data — no stale data issues.<br/>
-                  <span style={{color:C.accent,fontWeight:600}}>Stage mapping:</span> "Closed Won" → Won · "Closed Lost (Internal Issues FA)" → Lost (FA) · "Closed Lost" → Lost · everything else → Active
-                  {crmData.length>0&&<><br/><span style={{color:C.down,fontWeight:600}}>⚠️ {crmData.length} deals currently stored — uploading will replace all of them.</span></>}</p>
-              </div>
-              <UploadBox source="Zoho CRM Deals" color="#7c3aed" logo="◈"
-                files={crmFiles}
-                onAddFiles={f=>setCrmFiles(p=>[...p,...Array.from(f)])}
-                onDeleteFile={i=>setCrmFiles(p=>p.filter((_,j)=>j!==i))}/>
-              {crmError&&<div style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:9,padding:"12px 14px",fontSize:11.5,color:"#dc2626",whiteSpace:"pre-wrap",lineHeight:1.8,marginTop:8}}>⚠️ {crmError}</div>}
-              {crmDebug&&<div style={{background:C.accentLt,border:`1px solid ${C.accent}30`,borderRadius:9,padding:"11px 14px",fontSize:11,color:C.sub,fontFamily:"'DM Mono',monospace",whiteSpace:"pre-wrap",lineHeight:1.8,marginTop:8}}>{crmDebug}</div>}
-              <div style={{marginTop:10,display:"flex",justifyContent:"flex-end"}}>
-                <button className="sub-btn" disabled={!crmFiles.length||!libsReady||crmSub||crmDone} onClick={handleCrmSubmit}
-                  style={{background:crmDone?"#22c55e":crmFiles.length&&libsReady&&!crmSub?"#7c3aed":"#ccc",color:"#fff",border:"none",borderRadius:9,padding:"10px 24px",fontSize:13,fontWeight:800,cursor:"pointer",display:"flex",alignItems:"center",gap:7}}>
-                  {crmDone?"✓ Done!":crmSub?<><span style={{display:"inline-block",animation:"spin 1s linear infinite"}}>⟳</span> Parsing…</>:<><span style={{fontSize:15}}>◈</span> Import CRM</>}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* ══ CRM ══════════════════════════════════════════════════════════ */}
         {page==="crm"&&(()=>{
           const hasCrm = crmData.length > 0;
 
@@ -2380,7 +2286,7 @@ export default function App() {
                   </span>
                 )}
                 {hasCrm&&<button onClick={()=>setCrmData(EMPTY_CRM)} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:7,padding:'5px 10px',fontSize:11,fontWeight:600,color:C.muted,cursor:'pointer'}}>🗑 Clear CRM</button>}
-                <button onClick={()=>setPage('upload')} style={{background:'#7c3aed',color:'#fff',border:'none',borderRadius:7,padding:'5px 14px',fontSize:11,fontWeight:700,cursor:'pointer'}}>+ Upload</button>
+
               </div>
             </div>
 
@@ -2389,8 +2295,7 @@ export default function App() {
               <div style={{background:C.card,border:`2px dashed ${C.border}`,borderRadius:14,padding:'52px 24px',textAlign:'center',display:'flex',flexDirection:'column',alignItems:'center',gap:12}}>
                 <div style={{fontSize:32}}>◈</div>
                 <div style={{fontWeight:700,fontSize:15}}>No CRM data yet</div>
-                <div style={{fontSize:12.5,color:C.muted,maxWidth:440,lineHeight:1.7}}>Upload your Zoho CRM Deals export — CSV, XLS, XLSX, any format. The parser auto-detects all columns.</div>
-                <button onClick={()=>setPage('upload')} style={{background:'#7c3aed',color:'#fff',border:'none',borderRadius:9,padding:'9px 22px',fontSize:12.5,fontWeight:700,cursor:'pointer'}}>Go to Upload →</button>
+                <div style={{fontSize:12.5,color:C.muted,maxWidth:440,lineHeight:1.7}}>Click <b>⚡ Sync Now</b> on the Overview tab to pull live CRM data from Zoho.</div>
               </div>
             )}
 
@@ -2413,22 +2318,7 @@ export default function App() {
                 ))}
               </div>
 
-              {/* ── Revenue row ───────────────────────────────────────────── */}
-              {totalB2BValue>0&&(
-                <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(180px,1fr))',gap:8}}>
-                  {[
-                    {label:'Total Booked Revenue (B2B)', value:fmtINR(totalB2BValue), sub:'All B2B deals with amount', col:C.accent, green:true},
-                    {label:'Won Revenue',                value:fmtINR(wonValue),       sub:'Closed Won B2B',           col:'#16a34a'},
-                    {label:'Pipeline Value',             value:fmtINR(pipelineValue),  sub:'Active B2B deals',         col:'#7c3aed'},
-                  ].map(k=>(
-                    <div key={k.label} style={{background:k.green?C.accent:C.card,border:`1px solid ${k.green?'transparent':C.border}`,borderRadius:12,padding:'14px 16px',boxShadow:'0 1px 4px rgba(0,0,0,0.05)'}}>
-                      <div style={{fontSize:9,color:k.green?'rgba(255,255,255,0.65)':C.muted,textTransform:'uppercase',letterSpacing:1,fontWeight:700,marginBottom:4}}>{k.label}</div>
-                      <div style={{fontSize:20,fontWeight:800,color:k.green?'#fff':k.col,fontFamily:"'DM Mono',monospace"}}>{k.value}</div>
-                      <div style={{fontSize:10,color:k.green?'rgba(255,255,255,0.55)':C.muted,marginTop:3}}>{k.sub}</div>
-                    </div>
-                  ))}
-                </div>
-              )}
+
 
               {/* ── Charts row ────────────────────────────────────────────── */}
               <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(260px,1fr))',gap:12}}>
@@ -2869,7 +2759,7 @@ export default function App() {
                 <DateFilter fromDate={invFromDate} setFromDate={setInvFromDate} toDate={invToDate} setToDate={setInvToDate} label="Invoice date"/>
                 {hasInv&&<button onClick={()=>setInvoiceData(EMPTY_INV)}
                   style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:7,padding:"5px 10px",fontSize:11,fontWeight:600,color:C.muted,cursor:"pointer"}}>🗑 Clear</button>}
-                <button onClick={()=>setPage("upload")} style={{background:C.accent,color:"#fff",border:"none",borderRadius:7,padding:"5px 14px",fontSize:11,fontWeight:700,cursor:"pointer"}}>+ Upload</button>
+
               </div>
             </div>
 
@@ -2877,8 +2767,7 @@ export default function App() {
               <div style={{background:C.card,border:`2px dashed ${C.border}`,borderRadius:14,padding:"52px 24px",textAlign:"center",display:"flex",flexDirection:"column",alignItems:"center",gap:12}}>
                 <div style={{fontSize:32}}>📋</div>
                 <div style={{fontWeight:700,fontSize:15,color:C.text}}>No invoice data yet</div>
-                <div style={{fontSize:12.5,color:C.muted,maxWidth:420,lineHeight:1.7}}>Upload your Zoho Books invoice export. The dashboard will show B2B revenue by type, month, and customer — excluding D2C and Grants.</div>
-                <button onClick={()=>setPage("upload")} style={{background:C.accent,color:"#fff",border:"none",borderRadius:9,padding:"9px 22px",fontSize:12.5,fontWeight:700,cursor:"pointer"}}>Go to Upload →</button>
+                <div style={{fontSize:12.5,color:C.muted,maxWidth:420,lineHeight:1.7}}>Click <b>⚡ Sync Now</b> on the Overview tab to pull live invoice data from Zoho Books.</div>
               </div>
             )}
 
