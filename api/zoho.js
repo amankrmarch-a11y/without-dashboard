@@ -18,22 +18,24 @@ export default async function handler(req, res) {
     const { source, viewId } = req.query;
     const WS = '172632000001964001';
     const ORG = process.env.ZOHO_ANALYTICS_ORG_ID || '';
-    const VIEWS = {
-      crm: '172632000001964029',
-      meta: '172632000001964071',
-      linkedin: '172632000001964085',
-      google: '172632000001964061',
-    };
 
-    if (source === 'analytics' || VIEWS[source]) {
-      const vid = viewId || VIEWS[source];
-      if (!vid) return res.status(400).json({ error: 'viewId required' });
+    if (source === 'list_views') {
       const r = await fetch(
-        `https://analyticsapi.zoho.in/restapi/v2/workspaces/${WS}/views/${vid}/data?responseFormat=json`,
+        `https://analyticsapi.zoho.in/restapi/v2/workspaces/${WS}/views`,
         { headers: { Authorization: `Zoho-oauthtoken ${token}`, 'ZANALYTICS-ORGID': ORG } }
       );
       const d = await r.json();
-      return res.json({ success: true, source, data: d });
+      const views = d.data?.views?.map(v => ({ id: v.viewId, name: v.viewName })) || d;
+      return res.json({ success: true, views });
+    }
+
+    if (source === 'fetch' && viewId) {
+      const r = await fetch(
+        `https://analyticsapi.zoho.in/restapi/v2/workspaces/${WS}/views/${viewId}/data?responseFormat=json`,
+        { headers: { Authorization: `Zoho-oauthtoken ${token}`, 'ZANALYTICS-ORGID': ORG } }
+      );
+      const d = await r.json();
+      return res.json({ success: true, data: d });
     }
 
     if (source === 'invoices') {
@@ -57,7 +59,23 @@ export default async function handler(req, res) {
       return res.json({ success: true, source: 'invoices', count: all.length, data: all });
     }
 
-    return res.json({ success: true, message: 'v3 - Zoho API ready', workspace: WS });
+    if (source === 'crm_direct') {
+      let all = [], page = 1;
+      while (true) {
+        const r = await fetch(
+          `https://www.zohoapis.in/crm/v3/Deals?fields=Deal_Name,Account_Name,Stage,Deal_Type_B2B_B2C_etc,Amount,Closing_Date,Created_Time,Owner&per_page=200&page=${page}`,
+          { headers: { Authorization: `Zoho-oauthtoken ${token}` } }
+        );
+        const d = await r.json();
+        if (!d.data?.length) break;
+        all = [...all, ...d.data];
+        if (!d.info?.more_records) break;
+        page++;
+      }
+      return res.json({ success: true, source: 'crm', count: all.length, data: all });
+    }
+
+    return res.json({ success: true, message: 'v4 ready' });
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }
