@@ -1657,31 +1657,7 @@ export default function App() {
               ))}
             </div>
 
-            {/* Best Performer */}
-            {bestPerformer&&(
-              <div style={{background:`linear-gradient(135deg,${C.accent}22,${C.accentLt})`,border:`1px solid ${C.accent}40`,borderRadius:12,padding:"14px 18px",cursor:"pointer"}} onClick={()=>setPage("crm")}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:8}}>
-                  <div>
-                    <div style={{fontSize:9,color:C.accent,textTransform:"uppercase",letterSpacing:1.5,fontWeight:800,marginBottom:4}}>🏆 Best Performer {crmAppliedFrom||crmAppliedTo?`· ${crmAppliedFrom||'start'} → ${crmAppliedTo||'end'}`:""}</div>
-                    <div style={{fontSize:18,fontWeight:900,color:C.text}}>{bestPerformer.owner}</div>
-                  </div>
-                  <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
-                    {[
-                      {label:"Won Deals",   value:String(bestPerformer.won),                 col:"#16a34a"},
-                      {label:"Total Deals", value:String(bestPerformer.total),               col:C.text},
-                      {label:"Conv. Rate",  value:`${bestPerformer.convRate}%`,              col:C.accent},
-                      {label:"Won Value",   value:bestPerformer.wonValue>0?fmtINR(bestPerformer.wonValue):"—", col:"#16a34a"},
-                    ].map(k=>(
-                      <div key={k.label}>
-                        <div style={{fontSize:9,color:C.muted,textTransform:"uppercase",letterSpacing:1,fontWeight:700,marginBottom:2}}>{k.label}</div>
-                        <div style={{fontSize:16,fontWeight:800,color:k.col,fontFamily:"'DM Mono',monospace"}}>{k.value}</div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                <div style={{fontSize:10,color:C.muted,marginTop:8}}>Ranked by won value + deal count + conversion rate · Click to view CRM →</div>
-              </div>
-            )}
+
 
             {/* Quick nav cards */}
             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:10}}>
