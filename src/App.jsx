@@ -937,6 +937,17 @@ export default function App() {
   const[zohoLastSync,setZohoLastSync]=useState(()=>lsGet("wo_last_sync",null));
   useEffect(()=>{ lsSave("wo_last_sync",zohoLastSync); },[zohoLastSync]);
 
+  // ── Auto-sync on page load ─────────────────────────────────────────────────
+  useEffect(()=>{
+    // Only auto-sync if we haven't synced in the last 30 minutes
+    const lastSyncTime = lsGet("wo_last_sync_ts", 0);
+    const thirtyMins = 30 * 60 * 1000;
+    if(Date.now() - lastSyncTime > thirtyMins) {
+      syncZoho();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[]);
+
   const syncZoho = async () => {
     setZohoSyncing(true); setZohoSyncStatus(null);
     const results = [];
@@ -1138,6 +1149,7 @@ export default function App() {
       } else results.push(`⚠️ Google: ${gJson.success?'no data':'failed'}`);
 
       setZohoLastSync(new Date().toLocaleString('en-IN'));
+      lsSave("wo_last_sync_ts", Date.now());
       setZohoSyncStatus(results.join(' · '));
     } catch(err) {
       setZohoSyncStatus('❌ Error: ' + err.message);
@@ -2766,13 +2778,10 @@ export default function App() {
             {hasInv&&(<>
               {/* KPI row */}
               <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:8}}>
-                <KPI label="Total Revenue"    value={fmtINR(totalRev)} icon="💰" green/>
-                <KPI label="B2B Revenue"      value={fmtINR(b2bRev)} color={C.accent} icon="🏢" sub={`${b2bInv.length} invoices`}/>
-                <KPI label="D2C Revenue"      value={fmtINR(d2cRev)} color="#0a66c2" icon="🛒" sub={`${d2cInv.length} invoices`}/>
-                <KPI label="Closed Revenue"   value={fmtINR(closedRev)} color="#16a34a" icon="✅"/>
-                <KPI label="Overdue Revenue"  value={fmtINR(overdueRev)} color={C.down} icon="⏰"/>
-                <KPI label="Overdue Balance"   value={fmtINR(allInv.filter(r=>r.status==="Overdue").reduce((s,r)=>s+r.balance,0))} color={C.down} icon="⚠️" sub="amount still due"/>
-                <KPI label="Invoices (B2B)"    value={String(allInv.length)} icon="📋" sub={`${allInv.filter(r=>r.status==="Closed").length} closed · ${allInv.filter(r=>r.status==="Overdue").length} overdue`}/>
+                <KPI label="Total Revenue"  value={fmtINR(totalRev)} icon="💰" primary/>
+                <KPI label="B2B Revenue"    value={fmtINR(b2bRev)} color={C.accent} icon="🏢" sub={`${b2bInv.length} invoices`}/>
+                <KPI label="D2C Revenue"    value={fmtINR(d2cRev)} color="#0a66c2" icon="🛒" sub={`${d2cInv.length} invoices`}/>
+                <KPI label="Invoices"       value={String(allInv.length)} icon="📋" sub={`${allInv.filter(r=>r.status==="Closed").length} closed · ${allInv.filter(r=>r.status==="Overdue").length} overdue`}/>
               </div>
 
               {/* Charts row */}
