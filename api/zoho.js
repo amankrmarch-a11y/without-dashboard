@@ -4,7 +4,6 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') { res.status(200).end(); return; }
 
   try {
-    // Get fresh access token
     const tokenRes = await fetch('https://accounts.zoho.in/oauth/v2/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -22,56 +21,38 @@ export default async function handler(req, res) {
     const token = tokenData.access_token;
     const { source } = req.query;
 
-    // ── Get Org ID ────────────────────────────────────────────────────────────
-    const orgRes = await fetch('https://www.zohoapis.in/books/v3/organizations', {
-      headers: { Authorization: `Zoho-oauthtoken ${token}` }
-    });
-    const orgData = await orgRes.json();
-    const orgId = orgData.organizations?.[0]?.organization_id;
-
-    // ── Return org info ───────────────────────────────────────────────────────
-    if (source === 'org') {
-      return res.json({ success: true, orgId, organizations: orgData.organizations });
+    // ── Get Analytics Org ID ──────────────────────────────────────────────────
+    if (source === 'analytics_orgs') {
+      const r = await fetch('https://analyticsapi.zoho.in/restapi/v2/orgs', {
+        headers: { Authorization: `Zoho-oauthtoken ${token}` }
+      });
+      const d = await r.json();
+      return res.json({ success: true, data: d });
     }
 
-    // ── List Zoho Analytics views ─────────────────────────────────────────────
+    // ── List Analytics views ──────────────────────────────────────────────────
     if (source === 'list_views') {
       const workspaceId = '172632000001964001';
+      const analyticsOrgId = process.env.ZOHO_ANALYTICS_ORG_ID || '';
       const r = await fetch(
         `https://analyticsapi.zoho.in/restapi/v2/workspaces/${workspaceId}/views`,
         { headers: {
           Authorization: `Zoho-oauthtoken ${token}`,
-          'ZANALYTICS-ORGID': orgId || ''
+          'ZANALYTICS-ORGID': analyticsOrgId
         }}
       );
       const d = await r.json();
-      const views = d.data?.views?.map(v => ({
-        id: v.viewId,
-        name: v.viewName,
-        type: v.viewType
-      })) || d;
-      return res.json({ success: true, orgId, views });
+      return res.json({ success: true, analyticsOrgId, data: d });
     }
 
-    // ── Fetch a specific Analytics view ───────────────────────────────────────
-    if (source === 'analytics') {
-      const { viewName } = req.query;
-      if (!viewName) return res.status(400).json({ error: 'viewName required' });
-      const workspaceId = '172632000001964001';
-      const r = await fetch(
-        `https://analyticsapi.zoho.in/restapi/v2/workspaces/${workspaceId}/views/${encodeURIComponent(viewName)}/data?responseFormat=json`,
-        { headers: {
-          Authorization: `Zoho-oauthtoken ${token}`,
-          'ZANALYTICS-ORGID': orgId || ''
-        }}
-      );
-      const d = await r.json();
-      return res.json({ success: true, source: 'analytics', viewName, data: d });
-    }
-
-    // ── Invoices from Zoho Books ──────────────────────────────────────────────
+    // ── Invoices ──────────────────────────────────────────────────────────────
     if (source === 'invoices') {
-      if (!orgId) return res.status(400).json({ error: 'No org found', details: orgData });
+      const orgRes = await fetch('https://www.zohoapis.in/books/v3/organizations', {
+        headers: { Authorization: `Zoho-oauthtoken ${token}` }
+      });
+      const orgData = await orgRes.json();
+      const orgId = orgData.organizations?.[0]?.organization_id;
+      if (!orgId) return res.status(400).json({ error: 'No org found' });
       let all = [], page = 1;
       while (true) {
         const r = await fetch(
@@ -84,10 +65,10 @@ export default async function handler(req, res) {
         if (!d.page_context?.has_more_page) break;
         page++;
       }
-      return res.json({ success: true, source: 'invoices', count: all.length, orgId, data: all });
+      return res.json({ success: true, source: 'invoices', count: all.length, data: all });
     }
 
-    // ── CRM Deals from Zoho CRM ───────────────────────────────────────────────
+    // ── CRM ───────────────────────────────────────────────────────────────────
     if (source === 'crm') {
       let all = [], page = 1;
       while (true) {
@@ -104,8 +85,7 @@ export default async function handler(req, res) {
       return res.json({ success: true, source: 'crm', count: all.length, data: all });
     }
 
-    // ── Default ───────────────────────────────────────────────────────────────
-    return res.json({ success: true, message: 'Zoho API connected!', orgId, workspace: '172632000001964001' });
+    return res.json({ success: true, message: 'Zoho API connected!', workspace: '172632000001964001' });
 
   } catch (err) {
     return res.status(500).json({ error: err.message });
