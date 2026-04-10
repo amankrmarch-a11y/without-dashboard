@@ -1261,6 +1261,68 @@ export default function App() {
     });
   };
 
+  // ── Computed aggregates (ads) ─────────────────────────────────────────────
+  const avail=[...new Set([...liveData.meta,...liveData.linkedin,...liveData.google].map(d=>d.yearMonth||d.month).filter(Boolean))].sort();
+  const selMonths = useMemo(()=>{
+    if(!adsFromDate&&!adsToDate) return [];
+    const from = adsFromDate ? adsFromDate.slice(0,7) : null;
+    const to   = adsToDate   ? adsToDate.slice(0,7)   : null;
+    return avail.filter(m=>{
+      if(from&&m<from) return false;
+      if(to&&m>to) return false;
+      return true;
+    });
+  },[adsFromDate,adsToDate,avail]);
+
+  const inSel=m=>selMonths.length===0||selMonths.includes(m);
+  const prevMonth=m=>{ if(!m) return null; const [y,mo]=m.split('-').map(Number); const pm=mo===1?12:mo-1; const py=mo===1?y-1:y; return `${py}-${String(pm).padStart(2,'0')}`; };
+
+  const md=liveData.meta.filter(d=>inSel(d.yearMonth||d.month));
+  const ld=liveData.linkedin.filter(d=>inSel(d.yearMonth||d.month));
+  const gd=liveData.google.filter(d=>inSel(d.yearMonth||d.month));
+  const agg=arr=>arr.reduce((a,r)=>({spend:a.spend+r.spend,leads:a.leads+r.leads,clicks:a.clicks+r.clicks,impressions:a.impressions+r.impressions,reach:a.reach+(r.reach||0)}),{spend:0,leads:0,clicks:0,impressions:0,reach:0});
+  const mAgg=agg(md); const lAgg=agg(ld); const gAgg=agg(gd);
+  const tSpend=mAgg.spend+lAgg.spend+gAgg.spend;
+  const tLeads=mAgg.leads+lAgg.leads+gAgg.leads;
+  const tClicks=mAgg.clicks+lAgg.clicks+gAgg.clicks;
+  const tImpr=mAgg.impressions+lAgg.impressions+gAgg.impressions;
+  const bCPL=tLeads>0?Math.round(tSpend/tLeads):0;
+  const bCTR=tImpr>0?parseFloat(((tClicks/tImpr)*100).toFixed(2)):0;
+  const bCPC=tClicks>0?Math.round(tSpend/tClicks):0;
+  const allM=[...new Set([...md,...ld,...gd].map(r=>r.month))].sort((a,b)=>{ const mo=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]; return mo.indexOf(a)-mo.indexOf(b); });
+  const prevMonths=selMonths.length?selMonths.map(m=>prevMonth(m)).filter(Boolean):avail.slice(0,-1);
+  const pInSel=m=>prevMonths.includes(m);
+  const pmd=liveData.meta.filter(d=>pInSel(d.yearMonth||d.month));
+  const pld=liveData.linkedin.filter(d=>pInSel(d.yearMonth||d.month));
+  const pgd=liveData.google.filter(d=>pInSel(d.yearMonth||d.month));
+  const pAgg=agg([...pmd,...pld,...pgd]);
+  const prevSpend=pAgg.spend; const prevLeads=pAgg.leads; const prevCPL=pAgg.leads>0?Math.round(pAgg.spend/pAgg.leads):0;
+  const hasLive=liveData.meta.length>0||liveData.linkedin.length>0||liveData.google.length>0;
+  const pieData=[{name:"Meta",value:mAgg.spend,color:C.meta},{name:"LinkedIn",value:lAgg.spend,color:C.li},{name:"Google",value:gAgg.spend,color:C.google}].filter(p=>p.value>0);
+  const barData=allM.map(m=>({month:m,Meta:md.find(d=>d.month===m)?.spend||0,LinkedIn:ld.find(d=>d.month===m)?.spend||0,Google:gd.find(d=>d.month===m)?.spend||0}));
+  const cplData=allM.map(m=>({month:m,Meta:md.find(d=>d.month===m)?.cpl||0,LinkedIn:ld.find(d=>d.month===m)?.cpl||0,Google:gd.find(d=>d.month===m)?.cpl||0}));
+  const ctrData=allM.map(m=>({month:m,Meta:md.find(d=>d.month===m)?.ctr||0,LinkedIn:ld.find(d=>d.month===m)?.ctr||0,Google:gd.find(d=>d.month===m)?.ctr||0}));
+  const roasLabel = activeChan==="all"?"Blended ROAS":`${activeChan} ROAS`;
+  const allCampaigns = [...(liveData.metaCamp||[]).map(c=>({...c,source:"Meta"})),...(liveData.linkedinCamp||[]).map(c=>({...c,source:"LinkedIn"})),...(liveData.googleCamp||[]).map(c=>({...c,source:"Google"}))].filter(c=>activeChan==="all"||c.source===activeChan).sort((a,b)=>b.spend-a.spend).slice(0,10);
+  const chanEfficiency=[
+    (activeChan==="all"||activeChan==="Meta")     && liveData.meta.length>0     && {ch:"Meta",    color:C.meta,   spend:mAgg.spend, leads:mAgg.leads, cpl:mAgg.leads?Math.round(mAgg.spend/mAgg.leads):0,     ctr:mAgg.impressions?parseFloat(((mAgg.clicks/mAgg.impressions)*100).toFixed(2)):0, cpc:mAgg.clicks?Math.round(mAgg.spend/mAgg.clicks):0},
+    (activeChan==="all"||activeChan==="LinkedIn") && liveData.linkedin.length>0 && {ch:"LinkedIn", color:C.li,     spend:lAgg.spend, leads:lAgg.leads, cpl:lAgg.leads?Math.round(lAgg.spend/lAgg.leads):0,     ctr:lAgg.impressions?parseFloat(((lAgg.clicks/lAgg.impressions)*100).toFixed(2)):0, cpc:lAgg.clicks?Math.round(lAgg.spend/lAgg.clicks):0},
+    (activeChan==="all"||activeChan==="Google")   && liveData.google.length>0   && {ch:"Google",   color:C.google, spend:gAgg.spend, leads:gAgg.leads, cpl:gAgg.leads?Math.round(gAgg.spend/gAgg.leads):0,     ctr:gAgg.impressions?parseFloat(((gAgg.clicks/gAgg.impressions)*100).toFixed(2)):0, cpc:gAgg.clicks?Math.round(gAgg.spend/gAgg.clicks):0},
+  ].filter(Boolean).sort((a,b)=>a.cpl&&b.cpl?a.cpl-b.cpl:a.cpl?-1:1);
+
+  // ── Invoice aggregates ────────────────────────────────────────────────────
+  const invInSel = invoiceData.filter(r=>selMonths.length===0||selMonths.includes(r.yearMonth||r.month));
+  const totalB2BRevenue = invInSel.filter(r=>/^B2B/i.test(r.businessType||r.type||"")).reduce((s,r)=>s+r.subtotal,0);
+  const revenueROAS = totalB2BRevenue>0&&tSpend>0 ? parseFloat((totalB2BRevenue/tSpend).toFixed(2)) : 0;
+  const hasRevROAS = totalB2BRevenue>0&&tSpend>0;
+  const allMonthsUnion=[...new Set([...allM,...invoiceData.map(r=>r.yearMonth||r.month).filter(m=>m&&m!=="—")])].filter(m=>inSel(m)).sort();
+  const monthlyRevSpend=allMonthsUnion.map(m=>({
+    month:m,
+    revenue:invoiceData.filter(r=>(r.yearMonth||r.month)===m).reduce((s,r)=>s+r.subtotal,0),
+    spend:(md.find(d=>d.month===m)||{spend:0}).spend+(ld.find(d=>d.month===m)||{spend:0}).spend+(gd.find(d=>d.month===m)||{spend:0}).spend,
+    roas:0,
+  })).map(r=>({...r,roas:r.revenue>0&&r.spend>0?parseFloat((r.revenue/r.spend).toFixed(2)):0})).filter(r=>r.revenue>0||r.spend>0);
+
   const NAV=[
     {id:"home",    icon:"⬡",  label:"Overview"},
     {id:"ads",     icon:"📊", label:"Ad Spend"},
