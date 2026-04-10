@@ -941,9 +941,10 @@ export default function App() {
   useEffect(()=>{
     // Only auto-sync if we haven't synced in the last 30 minutes
     const lastSyncTime = lsGet("wo_last_sync_ts", 0);
-    const thirtyMins = 30 * 60 * 1000;
-    if(Date.now() - lastSyncTime > thirtyMins) {
-      syncZoho();
+    const twelveHours = 12 * 60 * 60 * 1000;
+    if(Date.now() - lastSyncTime > twelveHours) {
+      // Small delay so the page renders first before hitting the API
+      setTimeout(() => syncZoho(), 1500);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[]);
