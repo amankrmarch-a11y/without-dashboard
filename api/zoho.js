@@ -1,40 +1,33 @@
-// Helper: parse CSV text into array of objects
+// CSV → JSON parser
 function csvToJson(csv) {
   const lines = csv.split('\n').filter(l => l.trim());
   if (lines.length < 2) return [];
-  // Parse headers
-  const headers = parseCSVLine(lines[0]);
-  const rows = [];
-  for (let i = 1; i < lines.length; i++) {
-    const values = parseCSVLine(lines[i]);
-    if (values.length === 0) continue;
+  const headers = parseLine(lines[0]);
+  return lines.slice(1).map(line => {
+    const vals = parseLine(line);
     const obj = {};
-    headers.forEach((h, idx) => {
-      obj[h.trim()] = (values[idx] || '').trim();
-    });
-    rows.push(obj);
+    headers.forEach((h, i) => { obj[h.trim()] = (vals[i] || '').trim(); });
+    return obj;
+  }).filter(r => Object.values(r).some(v => v));
+}
+function parseLine(line) {
+  const result = []; let cur = ''; let inQ = false;
+  for (const ch of line) {
+    if (ch === '"') { inQ = !inQ; }
+    else if (ch === ',' && !inQ) { result.push(cur); cur = ''; }
+    else { cur += ch; }
   }
-  return rows;
+  result.push(cur);
+  return result;
 }
 
-// Helper: parse a single CSV line respecting quoted fields
-function parseCSVLine(line) {
-  const result = [];
-  let current = '';
-  let inQuotes = false;
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-    if (ch === '"') {
-      inQuotes = !inQuotes;
-    } else if (ch === ',' && !inQuotes) {
-      result.push(current);
-      current = '';
-    } else {
-      current += ch;
-    }
-  }
-  result.push(current);
-  return result;
+async function fetchView(token, workspaceId, viewId, orgId) {
+  const url = `https://analyticsapi.zoho.in/restapi/v2/workspaces/${workspaceId}/views/${viewId}/data`;
+  const r = await fetch(url, {
+    headers: { 'Authorization': `Zoho-oauthtoken ${token}`, 'ZANALYTICS-ORGID': orgId }
+  });
+  const text = await r.text();
+  try { return JSON.parse(text); } catch { return csvToJson(text); }
 }
 
 export default async function handler(req, res) {
@@ -43,7 +36,7 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') { res.status(200).end(); return; }
 
   try {
-    // Get fresh access token
+    // ── ONE token refresh per request ────────────────────────────────────────
     const tokenRes = await fetch('https://accounts.zoho.in/oauth/v2/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -71,78 +64,42 @@ export default async function handler(req, res) {
       invoices: '172632000001967250',
     };
 
-    // ── Fetch from Zoho Analytics (auto CSV→JSON) ─────────────────────────────
-    if (VIEWS[source]) {
-      const url = `https://analyticsapi.zoho.in/restapi/v2/workspaces/${WS}/views/${VIEWS[source]}/data`;
-      const r = await fetch(url, {
-        headers: {
-          'Authorization': `Zoho-oauthtoken ${token}`,
-          'ZANALYTICS-ORGID': ORG,
-          'Accept': 'application/json',
-        }
+    // ── ALL sources in one call — only ONE token refresh needed ──────────────
+    if (source === 'all') {
+      const [crm, invoices, meta, linkedin, google] = await Promise.all([
+        fetchView(token, WS, VIEWS.crm,      ORG),
+        fetchView(token, WS, VIEWS.invoices,  ORG),
+        fetchView(token, WS, VIEWS.meta,      ORG),
+        fetchView(token, WS, VIEWS.linkedin,  ORG),
+        fetchView(token, WS, VIEWS.google,    ORG),
+      ]);
+      return res.json({
+        success: true,
+        source: 'all',
+        crm:      { success: true, format: 'csv', count: Array.isArray(crm)      ? crm.length      : 0, data: crm },
+        invoices: { success: true, format: 'csv', count: Array.isArray(invoices) ? invoices.length : 0, data: invoices },
+        meta:     { success: true, format: 'csv', count: Array.isArray(meta)     ? meta.length     : 0, data: meta },
+        linkedin: { success: true, format: 'csv', count: Array.isArray(linkedin) ? linkedin.length : 0, data: linkedin },
+        google:   { success: true, format: 'csv', count: Array.isArray(google)   ? google.length   : 0, data: google },
       });
-      const text = await r.text();
-
-      // Try JSON first
-      let data;
-      try {
-        data = JSON.parse(text);
-        return res.json({ success: true, source, format: 'json', data });
-      } catch (e) {
-        // It's CSV — convert to JSON
-        const rows = csvToJson(text);
-        return res.json({
-          success: true,
-          source,
-          format: 'csv',
-          count: rows.length,
-          columns: rows.length > 0 ? Object.keys(rows[0]) : [],
-          data: rows
-        });
-      }
     }
 
-    // ── List views ────────────────────────────────────────────────────────────
+    // ── Single source (kept for debugging) ───────────────────────────────────
+    if (VIEWS[source]) {
+      const data = await fetchView(token, WS, VIEWS[source], ORG);
+      return res.json({ success: true, source, format: 'csv', count: Array.isArray(data) ? data.length : 0, data });
+    }
+
     if (source === 'list_views') {
       const r = await fetch(
         `https://analyticsapi.zoho.in/restapi/v2/workspaces/${WS}/views`,
         { headers: { 'Authorization': `Zoho-oauthtoken ${token}`, 'ZANALYTICS-ORGID': ORG } }
       );
       const d = await r.json();
-      const views = d.data?.views?.map(v => ({ id: v.viewId, name: v.viewName })) || d;
-      return res.json({ success: true, views });
+      return res.json({ success: true, views: d.data?.views?.map(v => ({ id: v.viewId, name: v.viewName })) || d });
     }
 
-    // ── Invoices fallback via Zoho Books API ──────────────────────────────────
-    if (source === 'invoices_books') {
-      const orgRes = await fetch('https://www.zohoapis.in/books/v3/organizations', {
-        headers: { Authorization: `Zoho-oauthtoken ${token}` }
-      });
-      const orgData = await orgRes.json();
-      const orgId = orgData.organizations?.[0]?.organization_id;
-      if (!orgId) return res.status(400).json({ error: 'No org found' });
-      let all = [], page = 1;
-      while (true) {
-        const r = await fetch(
-          `https://www.zohoapis.in/books/v3/invoices?organization_id=${orgId}&per_page=200&page=${page}`,
-          { headers: { Authorization: `Zoho-oauthtoken ${token}` } }
-        );
-        const d = await r.json();
-        if (!d.invoices?.length) break;
-        all = [...all, ...d.invoices];
-        if (!d.page_context?.has_more_page) break;
-        page++;
-      }
-      return res.json({ success: true, source: 'invoices', count: all.length, data: all });
-    }
-
-    // ── Default ───────────────────────────────────────────────────────────────
-    return res.json({
-      success: true,
-      message: 'v8 Zoho API ready',
-      workspace: WS,
-      views: VIEWS
-    });
+    return res.json({ success: true, message: 'v10 Zoho API ready', workspace: WS });
 
   } catch (err) {
     return res.status(500).json({ error: err.message });

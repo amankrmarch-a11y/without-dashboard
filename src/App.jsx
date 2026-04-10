@@ -954,7 +954,6 @@ export default function App() {
     const results = [];
     const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
-    // ── Helper: parse date — handles DD/MM/YYYY, YYYY-MM-DD, DD/MM/YYYY HH:MM AM/PM
     const parseDate = s => {
       if(!s) return '';
       const m1 = String(s).match(/^(\d{2})\/(\d{2})\/(\d{4})/);
@@ -963,20 +962,61 @@ export default function App() {
       if(m2) return s.slice(0,10);
       return '';
     };
-
-    // ── Helper: parse INR amount — handles "₹ 20,000.00", "INR 1,025,000.00", "1025000"
     const parseAmt = s => {
       if(!s) return 0;
-      const clean = String(s).replace(/INR|₹|,|\s/g,'').replace(/K$/i, '000').trim();
+      const clean = String(s).replace(/[$₹£€]|\bUSD\b|\bINR\b/gi,'').replace(/,/g,'').trim();
       return parseFloat(clean)||0;
+    };
+    const smartParseNum = v => {
+      if(v===undefined||v===null||v==='') return 0;
+      return parseFloat(String(v).replace(/[$₹£€]|\bUSD\b|\bINR\b/gi,'').replace(/,/g,'').trim())||0;
+    };
+    const findCol = (row, ...candidates) => {
+      const keys = Object.keys(row).map(k=>k.toLowerCase().trim());
+      for(const c of candidates){
+        const idx = keys.indexOf(c.toLowerCase().trim());
+        if(idx>=0) return Object.keys(row)[idx];
+      }
+      for(const c of candidates){
+        const idx = keys.findIndex(k=>k.includes(c.toLowerCase().trim()));
+        if(idx>=0) return Object.keys(row)[idx];
+      }
+      return null;
+    };
+    const parseAdsRows = (rows, spendCols, clickCols, impressionCols, leadCols, dateCols) => {
+      if(!rows.length) return [];
+      const sample = rows[0];
+      const dateCol  = findCol(sample, ...dateCols);
+      const spendCol = findCol(sample, ...spendCols);
+      const clickCol = findCol(sample, ...clickCols);
+      const imprCol  = findCol(sample, ...impressionCols);
+      const leadCol  = findCol(sample, ...leadCols);
+      const byMonth = {};
+      rows.forEach(r => {
+        const dateRaw  = dateCol ? r[dateCol] : '';
+        const normDate = parseDate(String(dateRaw||''));
+        const mi = normDate.length>=7 ? parseInt(normDate.slice(5,7),10)-1 : -1;
+        if(mi<0||mi>11) return;
+        const month = MONTHS[mi];
+        const yearMonth = normDate.slice(0,7);
+        if(!byMonth[yearMonth]) byMonth[yearMonth]={month,yearMonth,spend:0,impressions:0,clicks:0,leads:0,reach:0};
+        byMonth[yearMonth].spend       += spendCol ? smartParseNum(r[spendCol]) : 0;
+        byMonth[yearMonth].impressions += imprCol  ? (parseFloat(String(r[imprCol]||'').replace(/,/g,''))||0) : 0;
+        byMonth[yearMonth].clicks      += clickCol ? (parseFloat(String(r[clickCol]||'').replace(/,/g,''))||0) : 0;
+        byMonth[yearMonth].leads       += leadCol  ? (parseFloat(String(r[leadCol]||'').replace(/,/g,''))||0) : 0;
+      });
+      return Object.values(byMonth).sort((a,b)=>a.yearMonth.localeCompare(b.yearMonth));
     };
 
     try {
-      // ── 1. CRM from Zoho Analytics ─────────────────────────────────────────
-      const crmRes  = await fetch('/api/zoho?source=crm');
-      const crmJson = await crmRes.json();
-      if(crmJson.success && crmJson.data) {
-        const rows = Array.isArray(crmJson.data) ? crmJson.data : [];
+      // ── ONE API call — ONE token refresh — all 5 sources ─────────────────
+      const resp = await fetch('/api/zoho?source=all');
+      const json = await resp.json();
+      if(!json.success) throw new Error(json.error || 'Sync failed');
+
+      // ── Parse CRM ──────────────────────────────────────────────────────────
+      if(json.crm?.data?.length) {
+        const rows = json.crm.data;
         const seen = new Set();
         const parsed = rows.map(d => {
           const id = d['Id'] || `crm_${Math.random()}`;
@@ -985,9 +1025,7 @@ export default function App() {
           const stage   = d['Stage'] || '';
           const owner   = d['Deal Owner Name'] || '';
           const amount  = parseAmt(d['Amount'] || '0');
-          // Closing Date: "28/02/2023" (DD/MM/YYYY)
           const closing = parseDate(d['Closing Date'] || '');
-          // Created Time: "23/02/2023 11:45 AM" (DD/MM/YYYY HH:MM AM/PM)
           const created = parseDate(d['Created Time'] || '');
           const isB2B   = /^B2B/i.test(type);
           let stageClass;
@@ -996,7 +1034,7 @@ export default function App() {
           else if(stage==='Closed Lost') stageClass='closedLost';
           else stageClass='active';
           let closingMonth=null, closingYear=null;
-          if(closing && closing.length>=7){
+          if(closing&&closing.length>=7){
             const mi=parseInt(closing.slice(5,7),10)-1;
             if(mi>=0&&mi<=11){closingMonth=MONTHS[mi]; closingYear=parseInt(closing.slice(0,4),10);}
           }
@@ -1004,387 +1042,74 @@ export default function App() {
         }).filter(Boolean);
         setCrmData(parsed);
         results.push(`✅ CRM: ${parsed.length} deals`);
-      } else results.push(`⚠️ CRM failed`);
+      } else results.push(`⚠️ CRM: ${json.crm?.count===0?'no data':'failed'}`);
 
-      // ── 2. Invoices from Zoho Analytics ────────────────────────────────────
-      const invRes  = await fetch('/api/zoho?source=invoices');
-      const invJson = await invRes.json();
-      if(invJson.success && invJson.data) {
-        const rows = Array.isArray(invJson.data) ? invJson.data : [];
+      // ── Parse Invoices ─────────────────────────────────────────────────────
+      if(json.invoices?.data?.length) {
+        const rows = json.invoices.data;
         const seen2 = new Set();
         const parsed2 = rows.map(inv => {
-          // Exact column names from Zoho Analytics "Invoices (Zoho Books)" view
-          const invNum  = inv['Invoice Number'] || '';
-          if(!invNum || seen2.has(invNum)) return null; seen2.add(invNum);
-          // Use "Invoice Status" column — values are "Closed", "Overdue", "Draft" etc.
-          const statusRaw = (inv['Invoice Status'] || inv['Status'] || '').toLowerCase().trim();
+          const invNum = inv['Invoice Number'] || '';
+          if(!invNum||seen2.has(invNum)) return null; seen2.add(invNum);
+          const statusRaw = (inv['Invoice Status']||inv['Status']||'').toLowerCase().trim();
           const status = statusRaw==='closed'?'Closed':statusRaw==='overdue'?'Overdue':null;
           if(!status) return null;
-          // "Business Type" column (not CF.Business Type in Analytics view)
-          const bizType = (inv['Business Type'] || '').trim();
-          if(/^grant/i.test(bizType) || bizType.length < 2) return null;
-          // "Sub Total (BCY)" — format: "INR 1,025,000.00"
-          const subtotal = parseAmt(inv['Sub Total (BCY)'] || inv['SubTotal'] || '0');
-          // "Balance (BCY)" — format: "INR 0.00"
-          const balance  = parseAmt(inv['Balance (BCY)'] || inv['Balance'] || '0');
-          const customer = inv['Customer ID'] || '';
-          // "Invoice Date" — format: "11/10/2022" (DD/MM/YYYY)
-          const dateStr  = (inv['Invoice Date'] || '').split(' ')[0];
+          const bizType = (inv['Business Type']||'').trim();
+          if(/^grant/i.test(bizType)||bizType.length<2) return null;
+          const subtotal = parseAmt(inv['Sub Total (BCY)']||inv['SubTotal']||'0');
+          const balance  = parseAmt(inv['Balance (BCY)']||inv['Balance']||'0');
+          const customer = inv['Customer ID']||'';
+          const dateStr  = (inv['Invoice Date']||'').split(' ')[0];
           const normDate = parseDate(dateStr);
-          const yearMonth = normDate.slice(0,7) || '—';
-          let month = '—';
+          const yearMonth = normDate.slice(0,7)||'—';
+          let month='—';
           if(normDate.length>=7){const mi=parseInt(normDate.slice(5,7),10)-1; if(mi>=0&&mi<=11) month=MONTHS[mi];}
-          return {invoiceNumber:invNum, month, yearMonth, status, businessType:bizType, subtotal, balance, customer};
+          return {invoiceNumber:invNum,month,yearMonth,status,businessType:bizType,subtotal,balance,customer};
         }).filter(Boolean);
         setInvoiceData(parsed2);
-        results.push(`✅ Invoices: ${parsed2.length} synced`);
-      } else results.push(`⚠️ Invoices failed`);
+        results.push(`✅ Invoices: ${parsed2.length}`);
+      } else results.push(`⚠️ Invoices: ${json.invoices?.count===0?'no data':'failed'}`);
 
-      // ── 3. Meta Ads from Zoho Analytics ────────────────────────────────────
-      // ── Smart ads parser — works for Meta, LinkedIn, Google ─────────────────
-      // Detects spend/cost columns by name pattern, treats as INR regardless of symbol
-      // All other numeric cols (impressions, clicks, leads) parsed as plain numbers
-      const smartParseNum = v => {
-        if(v===undefined||v===null||v==='') return 0;
-        // Strip any currency symbol/prefix: $, ₹, USD, INR, £, €
-        const clean = String(v).replace(/[$₹£€]|\bUSD\b|\bINR\b/gi,'').replace(/,/g,'').trim();
-        return parseFloat(clean)||0;
-      };
-
-      const findCol = (row, ...candidates) => {
-        const keys = Object.keys(row).map(k=>k.toLowerCase().trim());
-        for(const c of candidates){
-          const idx = keys.indexOf(c.toLowerCase().trim());
-          if(idx>=0) return Object.keys(row)[idx];
-        }
-        // Partial match
-        for(const c of candidates){
-          const idx = keys.findIndex(k=>k.includes(c.toLowerCase().trim()));
-          if(idx>=0) return Object.keys(row)[idx];
-        }
-        return null;
-      };
-
-      const parseAdsRows = (rows, spendCols, clickCols, impressionCols, leadCols, dateCols, reachCols=[]) => {
-        if(!rows.length) return [];
-        const sample = rows[0];
-        const dateCol  = findCol(sample, ...dateCols);
-        const spendCol = findCol(sample, ...spendCols);
-        const clickCol = findCol(sample, ...clickCols);
-        const imprCol  = findCol(sample, ...impressionCols);
-        const leadCol  = findCol(sample, ...leadCols);
-        const reachCol = reachCols.length ? findCol(sample, ...reachCols) : null;
-        console.log('Cols detected:', {dateCol, spendCol, clickCol, imprCol, leadCol});
-        const byMonth = {};
-        rows.forEach(r => {
-          const dateRaw  = dateCol ? r[dateCol] : '';
-          const normDate = parseDate(String(dateRaw||''));
-          const mi = normDate.length>=7 ? parseInt(normDate.slice(5,7),10)-1 : -1;
-          if(mi<0||mi>11) return;
-          const month     = MONTHS[mi];
-          const yearMonth = normDate.slice(0,7);
-          if(!byMonth[yearMonth]) byMonth[yearMonth]={month,yearMonth,spend:0,impressions:0,clicks:0,leads:0,reach:0};
-          // Spend/cost: strip currency symbols, treat as INR
-          byMonth[yearMonth].spend       += spendCol ? smartParseNum(r[spendCol]) : 0;
-          // Other metrics: plain numbers
-          byMonth[yearMonth].impressions += imprCol  ? (parseFloat(String(r[imprCol]||'').replace(/,/g,''))||0) : 0;
-          byMonth[yearMonth].clicks      += clickCol ? (parseFloat(String(r[clickCol]||'').replace(/,/g,''))||0) : 0;
-          byMonth[yearMonth].leads       += leadCol  ? (parseFloat(String(r[leadCol]||'').replace(/,/g,''))||0) : 0;
-          byMonth[yearMonth].reach       += reachCol ? (parseFloat(String(r[reachCol]||'').replace(/,/g,''))||0) : 0;
-        });
-        return Object.values(byMonth).sort((a,b)=>a.yearMonth.localeCompare(b.yearMonth));
-      };
-
-      // ── 3. Meta Ads ────────────────────────────────────────────────────────
-      // Columns: Reporting Starts, Amount Spent ($→INR), Clicks (All), Impressions, Leads, Reach
-      const metaRes  = await fetch('/api/zoho?source=meta');
-      const metaJson = await metaRes.json();
-      if(metaJson.success && Array.isArray(metaJson.data) && metaJson.data.length>0) {
-        const monthly = parseAdsRows(
-          metaJson.data,
-          ['Amount Spent'],                          // spend: shows $ but is INR — strip symbol
-          ['Clicks (All)','Link Clicks','Clicks'],   // clicks: plain numbers
-          ['Impressions'],                           // impressions: plain numbers
-          ['Leads','Leads (Form)','Results'],        // leads: plain numbers
-          ['Reporting Starts','Reporting Ends','Date','date'],
-          ['Reach']
-        );
+      // ── Parse Meta ─────────────────────────────────────────────────────────
+      if(json.meta?.data?.length) {
+        const monthly = parseAdsRows(json.meta.data,
+          ['Amount Spent'],['Clicks (All)','Link Clicks','Clicks'],
+          ['Impressions'],['Leads','Leads (Form)','Results'],
+          ['Reporting Starts','Date','date']);
         if(monthly.length>0){ setLive(prev=>({...prev,meta:monthly})); results.push(`✅ Meta: ${monthly.length} months`); }
-        else results.push(`⚠️ Meta: 0 months — cols: ${Object.keys(metaJson.data[0]).slice(0,5).join(', ')}`);
-      } else results.push(`⚠️ Meta: ${metaJson.success?'no data':'failed'}`);
+        else results.push(`⚠️ Meta: 0 months`);
+      } else results.push(`⚠️ Meta: no data`);
 
-      // ── 4. LinkedIn Ads ────────────────────────────────────────────────────
-      // Columns: Date, Cost In Local Currency (INR 1,141.94), Clicks, Impressions, One Click Leads
-      const liRes  = await fetch('/api/zoho?source=linkedin');
-      const liJson = await liRes.json();
-      if(liJson.success && Array.isArray(liJson.data) && liJson.data.length>0) {
-        const monthly = parseAdsRows(
-          liJson.data,
-          ['Cost In Local Currency','Cost In Usd','Total Spent','Amount Spent','Spend'],  // INR prefix
-          ['Clicks','Action Clicks','Ad Unit Clicks'],
-          ['Impressions','Card Impressions'],
+      // ── Parse LinkedIn ─────────────────────────────────────────────────────
+      if(json.linkedin?.data?.length) {
+        const monthly = parseAdsRows(json.linkedin.data,
+          ['Cost In Local Currency','Cost In Usd','Total Spent','Spend'],
+          ['Clicks','Action Clicks'],['Impressions','Card Impressions'],
           ['One Click Leads','Leads','External Website Conversions'],
-          ['Date','date'],
-          []
-        );
+          ['Date','date']);
         if(monthly.length>0){ setLive(prev=>({...prev,linkedin:monthly})); results.push(`✅ LinkedIn: ${monthly.length} months`); }
-        else results.push(`⚠️ LinkedIn: 0 months — cols: ${Object.keys(liJson.data[0]).slice(0,5).join(', ')}`);
-      } else results.push(`⚠️ LinkedIn: ${liJson.success?'no data':'failed'}`);
+        else results.push(`⚠️ LinkedIn: 0 months`);
+      } else results.push(`⚠️ LinkedIn: no data`);
 
-      // ── 5. Google Ads ──────────────────────────────────────────────────────
-      // Columns: Day (YYYY-MM-DD), Costs ($→INR), Clicks, Impressions, Conversions
-      const gRes  = await fetch('/api/zoho?source=google');
-      const gJson = await gRes.json();
-      if(gJson.success && Array.isArray(gJson.data) && gJson.data.length>0) {
-        const monthly = parseAdsRows(
-          gJson.data,
-          ['Costs','Cost','Spend','Total Cost','Amount Spent'],  // spend: shows $ but is INR
-          ['Clicks','Interactions'],
-          ['Impressions'],
-          ['Conversions','All Conversions','Leads'],
-          ['Day','Date','date'],
-          []
-        );
+      // ── Parse Google ───────────────────────────────────────────────────────
+      if(json.google?.data?.length) {
+        const monthly = parseAdsRows(json.google.data,
+          ['Costs','Cost','Spend'],['Clicks','Interactions'],
+          ['Impressions'],['Conversions','All Conversions'],
+          ['Day','Date','date']);
         if(monthly.length>0){ setLive(prev=>({...prev,google:monthly})); results.push(`✅ Google: ${monthly.length} months`); }
-        else results.push(`⚠️ Google: 0 months — cols: ${Object.keys(gJson.data[0]).slice(0,5).join(', ')}`);
-      } else results.push(`⚠️ Google: ${gJson.success?'no data':'failed'}`);
+        else results.push(`⚠️ Google: 0 months`);
+      } else results.push(`⚠️ Google: no data`);
 
       setZohoLastSync(new Date().toLocaleString('en-IN'));
       lsSave("wo_last_sync_ts", Date.now());
       setZohoSyncStatus(results.join(' · '));
     } catch(err) {
-      setZohoSyncStatus('❌ Error: ' + err.message);
+      setZohoSyncStatus('❌ ' + err.message);
     } finally {
       setZohoSyncing(false);
     }
-  };
-  const[crmFiles,setCrmFiles]=useState([]);
-  const[crmSub,setCrmSub]=useState(false);
-  const[crmDone,setCrmDone]=useState(false);
-  const[crmError,setCrmError]=useState(null);
-  const[crmDebug,setCrmDebug]=useState(null);
-  useEffect(()=>{ lsSave("wo_crm",crmData); },[crmData]);
-  // CRM date filter
-  const[ovFrom,setOvFrom]=useState("");
-  const[ovTo,setOvTo]=useState("");
-  const[crmFromDate,setCrmFromDate]=useState("");
-  const[crmToDate,setCrmToDate]=useState("");
-  // Applied filter — only updates when user clicks Apply
-  const[crmAppliedFrom,setCrmAppliedFrom]=useState("");
-  const[crmAppliedTo,setCrmAppliedTo]=useState("");
-  const[selectedOwner,setSelectedOwner]=useState(null);
-  // Invoice date filter
-  const[invFromDate,setInvFromDate]=useState("");
-  const[invToDate,setInvToDate]=useState("");
-
-  // ── Estimate state ───────────────────────────────────────────────────────────
-  const[estBudget,setEstBudget]=useState("");
-  const[estLeads,setEstLeads]=useState("");
-  const[estResult,setEstResult]=useState(null);
-
-  // ── Persistent state — tries localStorage, silently falls back to empty ───────
-  const[liveData,setLive]=useState(()=>lsGet("wo_liveData", EMPTY_LIVE));
-  const[folders,setFolders]=useState(()=>lsGet("wo_folders", []));
-  const[budgetGoal,setBudgetGoal]=useState(()=>lsGet("wo_budget", ""));
-
-  // Persist whenever data changes (no-op if localStorage unavailable)
-  useEffect(()=>{ lsSave("wo_liveData", liveData); },[liveData]);
-  useEffect(()=>{ lsSave("wo_folders", folders); },[folders]);
-  useEffect(()=>{ lsSave("wo_budget", budgetGoal); },[budgetGoal]);
-
-  const[activeChan,setActiveChan]=useState("all");
-  const[revPerLead,setRevPerLead]=useState(()=>lsGet("wo_rpl",""));
-  useEffect(()=>{ lsSave("wo_rpl", revPerLead); },[revPerLead]);
-
-  // ── Unified simple date filter (shared approach across all pages) ─────────
-  const[adsFromDate,setAdsFromDate]=useState("");
-  const[adsToDate,setAdsToDate]=useState("");
-
-  // Derive selMonths from ads date filter (ads data is month-aggregated)
-  // avail = sorted unique "YYYY-MM" strings (or month names as fallback)
-  const avail=[...new Set([...liveData.meta,...liveData.linkedin,...liveData.google].map(d=>d.yearMonth||d.month).filter(Boolean))].sort();
-  // Year-aware selMonths — compare "YYYY-MM" strings from avail
-  const selMonths = useMemo(()=>{
-    if(!adsFromDate&&!adsToDate) return [];
-    const from = adsFromDate ? adsFromDate.slice(0,7) : null; // "2026-02"
-    const to   = adsToDate   ? adsToDate.slice(0,7)   : null;
-    return avail.filter(ym=>{
-      if(from && ym < from) return false;
-      if(to   && ym > to)   return false;
-      return true;
-    });
-  },[adsFromDate,adsToDate,avail]);
-
-  const hasLive=liveData.meta.length>0||liveData.linkedin.length>0||liveData.google.length>0;
-
-  // Filter data
-  const inSel=m=>selMonths.length===0||selMonths.includes(m);
-  const inChan=ch=>activeChan==="all"||activeChan===ch;
-
-  const md=inChan("Meta")?liveData.meta.filter(d=>inSel(d.month)):[];
-  const ld=inChan("LinkedIn")?liveData.linkedin.filter(d=>inSel(d.month)):[];
-  const gd=inChan("Google")?liveData.google.filter(d=>inSel(d.month)):[];
-
-  // Aggregates — current period
-  const agg=arr=>arr.reduce((a,r)=>({spend:a.spend+r.spend,impressions:a.impressions+r.impressions,clicks:a.clicks+r.clicks,leads:a.leads+r.leads,reach:a.reach+(r.reach||0)}),{spend:0,impressions:0,clicks:0,leads:0,reach:0});
-  const mAgg=agg(md), lAgg=agg(ld), gAgg=agg(gd);
-  const tSpend=mAgg.spend+lAgg.spend+gAgg.spend;
-  const tLeads=mAgg.leads+lAgg.leads+gAgg.leads;
-  const tClicks=mAgg.clicks+lAgg.clicks+gAgg.clicks;
-  const tImpr=mAgg.impressions+lAgg.impressions+gAgg.impressions;
-  const bCPL=tLeads?Math.round(tSpend/tLeads):0;
-  const bCTR=tImpr?parseFloat(((tClicks/tImpr)*100).toFixed(2)):0;
-  const bCPC=tClicks?Math.round(tSpend/tClicks):0;
-  const budgetUsed=budgetGoal?((tSpend/parseFloat(budgetGoal))*100).toFixed(1):null;
-
-  // ── ROAS calculations ──────────────────────────────────────────────────────
-  const rpl = parseFloat(revPerLead)||0; // Revenue per lead (manual input)
-  // Total conversion value from files (wherever available)
-  const tConvValue = [...md,...ld,...gd].reduce((s,r)=>s+(r.convValue||0),0);
-  // File-based ROAS: use conv value from files
-  const roasFile = tConvValue>0&&tSpend>0 ? parseFloat((tConvValue/tSpend).toFixed(2)) : 0;
-  // Manual ROAS: leads × rev per lead / spend
-  const roasManual = rpl>0&&tLeads>0&&tSpend>0 ? parseFloat(((tLeads*rpl)/tSpend).toFixed(2)) : 0;
-  // Display ROAS: prefer file-based if available, else manual
-  const displayROAS = roasFile>0 ? roasFile : roasManual;
-  // Estimated revenue
-  const estRevenue = tConvValue>0 ? tConvValue : (rpl>0&&tLeads>0 ? tLeads*rpl : 0);
-  // Per-channel ROAS for manual mode
-  const chanROAS = (a, leads) => rpl>0&&leads>0&&a.spend>0 ? parseFloat(((leads*rpl)/a.spend).toFixed(2)) : 0;
-  const metaROAS = md.reduce((s,r)=>s+(r.convValue||0),0)>0&&mAgg.spend>0
-    ? parseFloat((md.reduce((s,r)=>s+(r.convValue||0),0)/mAgg.spend).toFixed(2))
-    : chanROAS(mAgg, mAgg.leads);
-  const liROAS = ld.reduce((s,r)=>s+(r.convValue||0),0)>0&&lAgg.spend>0
-    ? parseFloat((ld.reduce((s,r)=>s+(r.convValue||0),0)/lAgg.spend).toFixed(2))
-    : chanROAS(lAgg, lAgg.leads);
-  const gROAS = gd.reduce((s,r)=>s+(r.convValue||0),0)>0&&gAgg.spend>0
-    ? parseFloat((gd.reduce((s,r)=>s+(r.convValue||0),0)/gAgg.spend).toFixed(2))
-    : chanROAS(gAgg, gAgg.leads);
-  const hasROAS = displayROAS>0;
-  // ROAS benchmark colour: <1 red, 1-2 amber, 2-4 green, >4 dark green
-  const roasColor = r => r<=0?C.muted:r<1?C.down:r<2?"#d97706":r<4?C.accent:"#15803d";
-
-  // Previous period — 1 step back from current selection
-  const prevMonth=(m)=>{const i=MONTHS_ORDER.indexOf(m);return i>0?MONTHS_ORDER[i-1]:null;};
-  const prevMonths=selMonths.length?selMonths.map(m=>prevMonth(m)).filter(Boolean):avail.slice(0,-1);
-  const prevFilter=m=>prevMonths.includes(m);
-  const pmd=liveData.meta.filter(d=>prevFilter(d.month));
-  const pld=liveData.linkedin.filter(d=>prevFilter(d.month));
-  const pgd=liveData.google.filter(d=>prevFilter(d.month));
-  const pAgg=agg([...pmd,...pld,...pgd]);
-  const prevSpend=pAgg.spend, prevLeads=pAgg.leads, prevCPL=prevLeads?Math.round(prevSpend/prevLeads):0;
-
-  // Chart data
-  const allM=[...new Set([...md,...ld,...gd].map(d=>d.month))].sort((a,b)=>MONTHS_ORDER.indexOf(a)-MONTHS_ORDER.indexOf(b));
-  const barData=allM.map(m=>({month:m,Meta:md.find(d=>d.month===m)?.spend||0,LinkedIn:ld.find(d=>d.month===m)?.spend||0,Google:gd.find(d=>d.month===m)?.spend||0}));
-  const cplData=allM.map(m=>({month:m,Meta:md.find(d=>d.month===m)?.cpl||0,LinkedIn:ld.find(d=>d.month===m)?.cpl||0,Google:gd.find(d=>d.month===m)?.cpl||0}));
-  const ctrData=allM.map(m=>({month:m,Meta:md.find(d=>d.month===m)?.ctr||0,LinkedIn:ld.find(d=>d.month===m)?.ctr||0,Google:gd.find(d=>d.month===m)?.ctr||0}));
-  // ROAS monthly trend — needs allM, so defined here
-  const roasTrendData = allM.map(m=>({
-    month:m,
-    Meta:    (()=>{ const r=md.find(d=>d.month===m); if(!r) return 0; return r.roas>0?r.roas:(rpl>0&&r.leads>0&&r.spend>0?parseFloat(((r.leads*rpl)/r.spend).toFixed(2)):0); })(),
-    LinkedIn:(()=>{ const r=ld.find(d=>d.month===m); if(!r) return 0; return r.roas>0?r.roas:(rpl>0&&r.leads>0&&r.spend>0?parseFloat(((r.leads*rpl)/r.spend).toFixed(2)):0); })(),
-    Google:  (()=>{ const r=gd.find(d=>d.month===m); if(!r) return 0; return r.roas>0?r.roas:(rpl>0&&r.leads>0&&r.spend>0?parseFloat(((r.leads*rpl)/r.spend).toFixed(2)):0); })(),
-  }));
-  const pieData=[
-    {name:"Meta",     value:mAgg.spend, color:C.meta},
-    {name:"LinkedIn", value:lAgg.spend, color:C.li},
-    {name:"Google",   value:gAgg.spend, color:C.google},
-  ].filter(p=>p.value>0);
-
-  // ── Revenue-based ROAS (from invoices) ────────────────────────────────────
-  // Filter invoiceData to months in current selection (selMonths)
-  const invInSel = invoiceData.filter(r=>selMonths.length===0||selMonths.includes(r.yearMonth||r.month));
-  const totalB2BRevenue = invInSel.reduce((s,r)=>s+r.subtotal,0);
-  const revenueROAS = totalB2BRevenue>0&&tSpend>0
-    ? parseFloat((totalB2BRevenue/tSpend).toFixed(2)) : 0;
-  const hasRevROAS = invoiceData.length>0&&tSpend>0;
-
-  // All months that appear in either ads OR invoices
-  const allMwithInv = [...new Set([
-    ...allM,
-    ...invoiceData.map(r=>r.yearMonth||r.month).filter(m=>m&&m!=="—")
-  ])].sort((a,b)=>MONTHS_ORDER.indexOf(a)-MONTHS_ORDER.indexOf(b));
-
-  // Monthly revenue vs spend — for chart + ROAS calculation
-  const monthlyRevSpend = allMwithInv.map(m=>{
-    const spend = (md.find(d=>d.month===m)?.spend||0)+(ld.find(d=>d.month===m)?.spend||0)+(gd.find(d=>d.month===m)?.spend||0);
-    const revenue = invoiceData.filter(r=>(r.yearMonth||r.month)===m).reduce((s,r)=>s+r.subtotal,0);
-    const roas = spend>0&&revenue>0 ? parseFloat((revenue/spend).toFixed(2)) : 0;
-    return {month:m, spend, revenue, roas};
-  }).filter(r=>r.spend>0||r.revenue>0);
-
-  // Label for blended/single ROAS KPI
-  const roasLabel = activeChan==="all" ? "Blended ROAS" : `${activeChan} ROAS`;
-
-  // Funnel data
-  const funnelData=[
-    {name:"Impressions",value:tImpr,fill:"#bfdbfe"},
-    {name:"Clicks",value:tClicks,fill:"#93c5fd"},
-    {name:"Leads",value:tLeads,fill:"#3b82f6"},
-  ].filter(f=>f.value>0);
-
-  // Campaign table — filtered by active channel
-  const allCampaigns=useMemo(()=>{
-    const metaCamps  = (activeChan==="all"||activeChan==="Meta")     ? liveData.metaCamp.map(c=>({...c,source:"Meta"}))     : [];
-    const liCamps    = (activeChan==="all"||activeChan==="LinkedIn") ? liveData.liCamp.map(c=>({...c,source:"LinkedIn"}))   : [];
-    const googleCamps= (activeChan==="all"||activeChan==="Google")   ? liveData.googleCamp.map(c=>({...c,source:"Google"})) : [];
-    return [...metaCamps,...liCamps,...googleCamps].sort((a,b)=>b.spend-a.spend).slice(0,10);
-  },[liveData,activeChan]);
-
-  // Channel efficiency rank — filtered by active channel
-  const chanEfficiency=[
-    (activeChan==="all"||activeChan==="Meta")     && liveData.meta.length>0     && {ch:"Meta",    color:C.meta,   spend:mAgg.spend, leads:mAgg.leads, cpl:mAgg.leads?Math.round(mAgg.spend/mAgg.leads):0,     ctr:mAgg.impressions?parseFloat(((mAgg.clicks/mAgg.impressions)*100).toFixed(2)):0, cpc:mAgg.clicks?Math.round(mAgg.spend/mAgg.clicks):0},
-    (activeChan==="all"||activeChan==="LinkedIn") && liveData.linkedin.length>0 && {ch:"LinkedIn", color:C.li,     spend:lAgg.spend, leads:lAgg.leads, cpl:lAgg.leads?Math.round(lAgg.spend/lAgg.leads):0,     ctr:lAgg.impressions?parseFloat(((lAgg.clicks/lAgg.impressions)*100).toFixed(2)):0, cpc:lAgg.clicks?Math.round(lAgg.spend/lAgg.clicks):0},
-    (activeChan==="all"||activeChan==="Google")   && liveData.google.length>0   && {ch:"Google",   color:C.google, spend:gAgg.spend, leads:gAgg.leads, cpl:gAgg.leads?Math.round(gAgg.spend/gAgg.leads):0,     ctr:gAgg.impressions?parseFloat(((gAgg.clicks/gAgg.impressions)*100).toFixed(2)):0, cpc:gAgg.clicks?Math.round(gAgg.spend/gAgg.clicks):0},
-  ].filter(Boolean).sort((a,b)=>a.cpl&&b.cpl?(a.cpl-b.cpl):(b.spend-a.spend));
-
-  // ── Submit — MERGES new data into existing ──────────────────────────────────
-  const handleSubmit=async()=>{
-    if(!window.Papa||!window.XLSX){setError("Libraries loading…");return;}
-    setSub(true);setError(null);setDebug(null);
-    try{
-      const present=[
-        files.meta.length>0&&{key:"meta",source:"Meta",fileList:files.meta},
-        files.linkedin.length>0&&{key:"linkedin",source:"LinkedIn",fileList:files.linkedin},
-        files.google.length>0&&{key:"google",source:"Google",fileList:files.google},
-      ].filter(Boolean);
-
-      // Start from existing data — MERGE, don't overwrite
-      const newLive={...liveData};
-      const folderFiles=[];const dbg=[];
-
-      for(const{key,source,fileList}of present){
-        for(const file of fileList){
-        try{
-        const{rows,encoding,reportMonth,reportYear}=await readFileToRows(file);
-        if(!rows||!rows.length){dbg.push(`⚠️ ${source} | ${file.name} — no rows, skipped`);continue;}
-        const{monthly,campaigns,hmap,headers}=parseFile(rows,reportMonth,reportYear);
-        if(!hmap.month||!hmap.spend||!monthly.length){dbg.push(`⚠️ ${source} | ${file.name} — no spend/date columns found, skipped\n  Headers: ${headers.slice(0,8).join(", ")}`);continue;}
-
-        // Merge: keep all previous months, new month data overwrites same-month entries
-        newLive[key]          = mergeMonthly(newLive[key]||[], monthly);
-        newLive[`${key}Camp`] = mergeCampaigns(newLive[`${key}Camp`]||[], campaigns);
-
-        const totSpend=monthly.reduce((s,r)=>s+r.spend,0);
-        const totLeads=monthly.reduce((s,r)=>s+r.leads,0);
-        const allMonthsNow=newLive[key].map(r=>r.yearMonth||r.month);
-        dbg.push(`✓ ${source} | ${file.name} → ${monthly.length} month(s) [${allMonthsNow.join(", ")}]\n  spend ${fmtINR(totSpend)} | leads ${totLeads||"—"} | enc: ${encoding}`);
-        folderFiles.push({source,name:file.name,size:file.size>1024*1024?`${(file.size/1024/1024).toFixed(1)} MB`:`${Math.round(file.size/1024)} KB`,rows:rows.length,months:monthly.length,encoding});
-        }catch(fileErr){dbg.push(`⚠️ ${source} | ${file.name} — ${fileErr.message}`);}
-        } // end inner file loop
-      }
-
-      setLive(newLive);
-      setDebug(dbg.join("\n\n"));
-      const now=new Date(),pad=n=>String(n).padStart(2,"0");
-      const datetime=`${pad(now.getDate())} ${now.toLocaleString("en",{month:"short"})} ${now.getFullYear()}, ${pad(now.getHours())}:${pad(now.getMinutes())}`;
-      setFolders(prev=>[{id:Date.now(),name:folderLabel(present.map(p=>p.source),now),datetime,sources:present.map(p=>p.source),files:folderFiles},...prev]);
-      setDone(true);setFiles({meta:[],linkedin:[],google:[]});
-      setTimeout(()=>{setDone(false);setPage("home");},900);
-    }catch(err){setError(err.message);console.error(err);}
-    finally{setSub(false);}
-  };
+  };;
 
   const hasFiles=files.meta.length>0||files.linkedin.length>0||files.google.length>0; // legacy upload
   const fileCount=files.meta.length+files.linkedin.length+files.google.length;
