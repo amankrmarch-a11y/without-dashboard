@@ -995,86 +995,110 @@ export default function App() {
       } else results.push(`⚠️ Invoices failed`);
 
       // ── 3. Meta Ads from Zoho Analytics ────────────────────────────────────
+      // ── Smart ads parser — works for Meta, LinkedIn, Google ─────────────────
+      // Detects spend/cost columns by name pattern, treats as INR regardless of symbol
+      // All other numeric cols (impressions, clicks, leads) parsed as plain numbers
+      const smartParseNum = v => {
+        if(v===undefined||v===null||v==='') return 0;
+        // Strip any currency symbol/prefix: $, ₹, USD, INR, £, €
+        const clean = String(v).replace(/[$₹£€]|\bUSD\b|\bINR\b/gi,'').replace(/,/g,'').trim();
+        return parseFloat(clean)||0;
+      };
+
+      const findCol = (row, ...candidates) => {
+        const keys = Object.keys(row).map(k=>k.toLowerCase().trim());
+        for(const c of candidates){
+          const idx = keys.indexOf(c.toLowerCase().trim());
+          if(idx>=0) return Object.keys(row)[idx];
+        }
+        // Partial match
+        for(const c of candidates){
+          const idx = keys.findIndex(k=>k.includes(c.toLowerCase().trim()));
+          if(idx>=0) return Object.keys(row)[idx];
+        }
+        return null;
+      };
+
+      const parseAdsRows = (rows, spendCols, clickCols, impressionCols, leadCols, dateCols, reachCols=[]) => {
+        if(!rows.length) return [];
+        const sample = rows[0];
+        const dateCol  = findCol(sample, ...dateCols);
+        const spendCol = findCol(sample, ...spendCols);
+        const clickCol = findCol(sample, ...clickCols);
+        const imprCol  = findCol(sample, ...impressionCols);
+        const leadCol  = findCol(sample, ...leadCols);
+        const reachCol = reachCols.length ? findCol(sample, ...reachCols) : null;
+        console.log('Cols detected:', {dateCol, spendCol, clickCol, imprCol, leadCol});
+        const byMonth = {};
+        rows.forEach(r => {
+          const dateRaw  = dateCol ? r[dateCol] : '';
+          const normDate = parseDate(String(dateRaw||''));
+          const mi = normDate.length>=7 ? parseInt(normDate.slice(5,7),10)-1 : -1;
+          if(mi<0||mi>11) return;
+          const month     = MONTHS[mi];
+          const yearMonth = normDate.slice(0,7);
+          if(!byMonth[yearMonth]) byMonth[yearMonth]={month,yearMonth,spend:0,impressions:0,clicks:0,leads:0,reach:0};
+          // Spend/cost: strip currency symbols, treat as INR
+          byMonth[yearMonth].spend       += spendCol ? smartParseNum(r[spendCol]) : 0;
+          // Other metrics: plain numbers
+          byMonth[yearMonth].impressions += imprCol  ? (parseFloat(String(r[imprCol]||'').replace(/,/g,''))||0) : 0;
+          byMonth[yearMonth].clicks      += clickCol ? (parseFloat(String(r[clickCol]||'').replace(/,/g,''))||0) : 0;
+          byMonth[yearMonth].leads       += leadCol  ? (parseFloat(String(r[leadCol]||'').replace(/,/g,''))||0) : 0;
+          byMonth[yearMonth].reach       += reachCol ? (parseFloat(String(r[reachCol]||'').replace(/,/g,''))||0) : 0;
+        });
+        return Object.values(byMonth).sort((a,b)=>a.yearMonth.localeCompare(b.yearMonth));
+      };
+
+      // ── 3. Meta Ads ────────────────────────────────────────────────────────
       const metaRes  = await fetch('/api/zoho?source=meta');
       const metaJson = await metaRes.json();
-      if(metaJson.success && metaJson.data) {
-        const rows = Array.isArray(metaJson.data) ? metaJson.data : [];
-        const byMonth = {};
-        rows.forEach(r => {
-          const dateRaw = r['Date'] || r['date'] || r['Reporting starts'] || '';
-          const normDate = parseDate(dateRaw);
-          const mi = normDate.length>=7 ? parseInt(normDate.slice(5,7),10)-1 : -1;
-          const month = mi>=0&&mi<=11 ? MONTHS[mi] : null;
-          const yearMonth = normDate.slice(0,7) || null;
-          if(!month) return;
-          const key = yearMonth || month;
-          if(!byMonth[key]) byMonth[key] = {month, yearMonth:key, spend:0, impressions:0, clicks:0, leads:0, reach:0};
-          byMonth[key].spend       += parseAmt(r['Amount Spent'] || r['Spend'] || r['spend'] || '0');
-          byMonth[key].impressions += parseFloat(r['Impressions']||'0')||0;
-          byMonth[key].clicks      += parseFloat(r['Clicks']||r['Link Clicks']||'0')||0;
-          byMonth[key].leads       += parseFloat(r['Leads']||r['Results']||'0')||0;
-          byMonth[key].reach       += parseFloat(r['Reach']||'0')||0;
-        });
-        const monthly = Object.values(byMonth).sort((a,b)=>a.yearMonth.localeCompare(b.yearMonth));
-        if(monthly.length>0){
-          setLive(prev => ({...prev, meta: monthly}));
-          results.push(`✅ Meta: ${monthly.length} months`);
-        } else results.push(`⚠️ Meta: no spend data found`);
-      } else results.push(`⚠️ Meta failed`);
+      if(metaJson.success && Array.isArray(metaJson.data) && metaJson.data.length>0) {
+        const monthly = parseAdsRows(
+          metaJson.data,
+          ['Amount Spent (INR)','Amount Spent (USD)','Amount Spent','Spend','Total Spend','Ad Spend','Cost'],
+          ['Clicks (All)','Link Clicks','Clicks'],
+          ['Impressions'],
+          ['Results','Leads','Conversions'],
+          ['Date','Reporting Date','Report Date','Day','Week','Month','date'],
+          ['Reach']
+        );
+        if(monthly.length>0){ setLive(prev=>({...prev,meta:monthly})); results.push(`✅ Meta: ${monthly.length} months`); }
+        else results.push(`⚠️ Meta: 0 months — columns: ${Object.keys(metaJson.data[0]).slice(0,6).join(', ')}`);
+      } else results.push(`⚠️ Meta: ${metaJson.success?'no data':'failed'}`);
 
-      // ── 4. LinkedIn Ads from Zoho Analytics ────────────────────────────────
+      // ── 4. LinkedIn Ads ────────────────────────────────────────────────────
       const liRes  = await fetch('/api/zoho?source=linkedin');
       const liJson = await liRes.json();
-      if(liJson.success && liJson.data) {
-        const rows = Array.isArray(liJson.data) ? liJson.data : [];
-        const byMonth = {};
-        rows.forEach(r => {
-          const dateRaw = r['Start Date'] || r['Date'] || r['date'] || '';
-          const normDate = parseDate(dateRaw);
-          const mi = normDate.length>=7 ? parseInt(normDate.slice(5,7),10)-1 : -1;
-          const month = mi>=0&&mi<=11 ? MONTHS[mi] : null;
-          const yearMonth = normDate.slice(0,7) || null;
-          if(!month) return;
-          const key = yearMonth || month;
-          if(!byMonth[key]) byMonth[key] = {month, yearMonth:key, spend:0, impressions:0, clicks:0, leads:0, reach:0};
-          byMonth[key].spend       += parseAmt(r['Total Spent'] || r['Amount Spent'] || r['Spend'] || r['spend'] || '0');
-          byMonth[key].impressions += parseFloat(r['Impressions']||'0')||0;
-          byMonth[key].clicks      += parseFloat(r['Clicks']||'0')||0;
-          byMonth[key].leads       += parseFloat(r['Leads']||r['Conversions']||'0')||0;
-        });
-        const monthly = Object.values(byMonth).sort((a,b)=>a.yearMonth.localeCompare(b.yearMonth));
-        if(monthly.length>0){
-          setLive(prev => ({...prev, linkedin: monthly}));
-          results.push(`✅ LinkedIn: ${monthly.length} months`);
-        } else results.push(`⚠️ LinkedIn: no spend data found`);
-      } else results.push(`⚠️ LinkedIn failed`);
+      if(liJson.success && Array.isArray(liJson.data) && liJson.data.length>0) {
+        const monthly = parseAdsRows(
+          liJson.data,
+          ['Total Spent','Amount Spent (INR)','Amount Spent','Spend','Cost','Total Cost'],
+          ['Clicks','Total Clicks'],
+          ['Impressions','Total Impressions'],
+          ['Leads','Conversions','Total Conversions'],
+          ['Start Date','Date','Day','Month','date'],
+          []
+        );
+        if(monthly.length>0){ setLive(prev=>({...prev,linkedin:monthly})); results.push(`✅ LinkedIn: ${monthly.length} months`); }
+        else results.push(`⚠️ LinkedIn: 0 months — columns: ${Object.keys(liJson.data[0]).slice(0,6).join(', ')}`);
+      } else results.push(`⚠️ LinkedIn: ${liJson.success?'no data':'failed'}`);
 
-      // ── 5. Google Ads from Zoho Analytics ──────────────────────────────────
+      // ── 5. Google Ads ──────────────────────────────────────────────────────
       const gRes  = await fetch('/api/zoho?source=google');
       const gJson = await gRes.json();
-      if(gJson.success && gJson.data) {
-        const rows = Array.isArray(gJson.data) ? gJson.data : [];
-        const byMonth = {};
-        rows.forEach(r => {
-          const dateRaw = r['Date'] || r['Day'] || r['date'] || '';
-          const normDate = parseDate(dateRaw);
-          const mi = normDate.length>=7 ? parseInt(normDate.slice(5,7),10)-1 : -1;
-          const month = mi>=0&&mi<=11 ? MONTHS[mi] : null;
-          const yearMonth = normDate.slice(0,7) || null;
-          if(!month) return;
-          const key = yearMonth || month;
-          if(!byMonth[key]) byMonth[key] = {month, yearMonth:key, spend:0, impressions:0, clicks:0, leads:0, reach:0};
-          byMonth[key].spend       += parseAmt(r['Cost'] || r['Spend'] || r['spend'] || '0');
-          byMonth[key].impressions += parseFloat(r['Impressions']||'0')||0;
-          byMonth[key].clicks      += parseFloat(r['Clicks']||'0')||0;
-          byMonth[key].leads       += parseFloat(r['Conversions']||r['Leads']||'0')||0;
-        });
-        const monthly = Object.values(byMonth).sort((a,b)=>a.yearMonth.localeCompare(b.yearMonth));
-        if(monthly.length>0){
-          setLive(prev => ({...prev, google: monthly}));
-          results.push(`✅ Google: ${monthly.length} months`);
-        } else results.push(`⚠️ Google: no spend data found`);
-      } else results.push(`⚠️ Google failed`);
+      if(gJson.success && Array.isArray(gJson.data) && gJson.data.length>0) {
+        const monthly = parseAdsRows(
+          gJson.data,
+          ['Cost','Spend','Total Cost','Amount Spent','Total Spend'],
+          ['Clicks','Total Clicks'],
+          ['Impressions','Total Impressions'],
+          ['Conversions','Leads','Total Conversions'],
+          ['Date','Day','Week','Month','date'],
+          []
+        );
+        if(monthly.length>0){ setLive(prev=>({...prev,google:monthly})); results.push(`✅ Google: ${monthly.length} months`); }
+        else results.push(`⚠️ Google: 0 months — columns: ${Object.keys(gJson.data[0]).slice(0,6).join(', ')}`);
+      } else results.push(`⚠️ Google: ${gJson.success?'no data':'failed'}`);
 
       setZohoLastSync(new Date().toLocaleString('en-IN'));
       setZohoSyncStatus(results.join(' · '));
@@ -1310,7 +1334,7 @@ export default function App() {
     finally{setSub(false);}
   };
 
-  const hasFiles=files.meta.length>0||files.linkedin.length>0||files.google.length>0;
+  const hasFiles=files.meta.length>0||files.linkedin.length>0||files.google.length>0; // legacy upload
   const fileCount=files.meta.length+files.linkedin.length+files.google.length;
 
   // ── Invoice submit ───────────────────────────────────────────────────────────
@@ -1451,11 +1475,10 @@ export default function App() {
   const NAV=[
     {id:"home",    icon:"⬡",  label:"Overview"},
     {id:"ads",     icon:"📊", label:"Ad Spend"},
-    {id:"crm",     icon:"◈",  label:"Sales"},
-    {id:"invoices",icon:"₹",  label:"Revenue"},
+    {id:"crm",     icon:"◈",  label:"Revenue"},
+    {id:"invoices",icon:"₹",  label:"Invoices"},
     {id:"estimate",icon:"◎",  label:"Estimate"},
-    {id:"upload",  icon:"↑",  label:"Upload"},
-    {id:"history", icon:"◷",  label:"History"},
+    {id:"upload",  icon:"⚡",  label:"Sync"},
   ];
 
   const now = new Date();
