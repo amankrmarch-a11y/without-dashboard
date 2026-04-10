@@ -1050,54 +1050,57 @@ export default function App() {
       };
 
       // ── 3. Meta Ads ────────────────────────────────────────────────────────
+      // Columns: Reporting Starts, Amount Spent ($→INR), Clicks (All), Impressions, Leads, Reach
       const metaRes  = await fetch('/api/zoho?source=meta');
       const metaJson = await metaRes.json();
       if(metaJson.success && Array.isArray(metaJson.data) && metaJson.data.length>0) {
         const monthly = parseAdsRows(
           metaJson.data,
-          ['Amount Spent (INR)','Amount Spent (USD)','Amount Spent','Spend','Total Spend','Ad Spend','Cost'],
-          ['Clicks (All)','Link Clicks','Clicks'],
-          ['Impressions'],
-          ['Results','Leads','Conversions'],
-          ['Date','Reporting Date','Report Date','Day','Week','Month','date'],
+          ['Amount Spent'],                          // spend: shows $ but is INR — strip symbol
+          ['Clicks (All)','Link Clicks','Clicks'],   // clicks: plain numbers
+          ['Impressions'],                           // impressions: plain numbers
+          ['Leads','Leads (Form)','Results'],        // leads: plain numbers
+          ['Reporting Starts','Reporting Ends','Date','date'],
           ['Reach']
         );
         if(monthly.length>0){ setLive(prev=>({...prev,meta:monthly})); results.push(`✅ Meta: ${monthly.length} months`); }
-        else results.push(`⚠️ Meta: 0 months — columns: ${Object.keys(metaJson.data[0]).slice(0,6).join(', ')}`);
+        else results.push(`⚠️ Meta: 0 months — cols: ${Object.keys(metaJson.data[0]).slice(0,5).join(', ')}`);
       } else results.push(`⚠️ Meta: ${metaJson.success?'no data':'failed'}`);
 
       // ── 4. LinkedIn Ads ────────────────────────────────────────────────────
+      // Columns: Date, Cost In Local Currency (INR 1,141.94), Clicks, Impressions, One Click Leads
       const liRes  = await fetch('/api/zoho?source=linkedin');
       const liJson = await liRes.json();
       if(liJson.success && Array.isArray(liJson.data) && liJson.data.length>0) {
         const monthly = parseAdsRows(
           liJson.data,
-          ['Total Spent','Amount Spent (INR)','Amount Spent','Spend','Cost','Total Cost'],
-          ['Clicks','Total Clicks'],
-          ['Impressions','Total Impressions'],
-          ['Leads','Conversions','Total Conversions'],
-          ['Start Date','Date','Day','Month','date'],
+          ['Cost In Local Currency','Cost In Usd','Total Spent','Amount Spent','Spend'],  // INR prefix
+          ['Clicks','Action Clicks','Ad Unit Clicks'],
+          ['Impressions','Card Impressions'],
+          ['One Click Leads','Leads','External Website Conversions'],
+          ['Date','date'],
           []
         );
         if(monthly.length>0){ setLive(prev=>({...prev,linkedin:monthly})); results.push(`✅ LinkedIn: ${monthly.length} months`); }
-        else results.push(`⚠️ LinkedIn: 0 months — columns: ${Object.keys(liJson.data[0]).slice(0,6).join(', ')}`);
+        else results.push(`⚠️ LinkedIn: 0 months — cols: ${Object.keys(liJson.data[0]).slice(0,5).join(', ')}`);
       } else results.push(`⚠️ LinkedIn: ${liJson.success?'no data':'failed'}`);
 
       // ── 5. Google Ads ──────────────────────────────────────────────────────
+      // Columns: Day (YYYY-MM-DD), Costs ($→INR), Clicks, Impressions, Conversions
       const gRes  = await fetch('/api/zoho?source=google');
       const gJson = await gRes.json();
       if(gJson.success && Array.isArray(gJson.data) && gJson.data.length>0) {
         const monthly = parseAdsRows(
           gJson.data,
-          ['Cost','Spend','Total Cost','Amount Spent','Total Spend'],
-          ['Clicks','Total Clicks'],
-          ['Impressions','Total Impressions'],
-          ['Conversions','Leads','Total Conversions'],
-          ['Date','Day','Week','Month','date'],
+          ['Costs','Cost','Spend','Total Cost','Amount Spent'],  // spend: shows $ but is INR
+          ['Clicks','Interactions'],
+          ['Impressions'],
+          ['Conversions','All Conversions','Leads'],
+          ['Day','Date','date'],
           []
         );
         if(monthly.length>0){ setLive(prev=>({...prev,google:monthly})); results.push(`✅ Google: ${monthly.length} months`); }
-        else results.push(`⚠️ Google: 0 months — columns: ${Object.keys(gJson.data[0]).slice(0,6).join(', ')}`);
+        else results.push(`⚠️ Google: 0 months — cols: ${Object.keys(gJson.data[0]).slice(0,5).join(', ')}`);
       } else results.push(`⚠️ Google: ${gJson.success?'no data':'failed'}`);
 
       setZohoLastSync(new Date().toLocaleString('en-IN'));
