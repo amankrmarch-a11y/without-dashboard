@@ -4,7 +4,7 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') { res.status(200).end(); return; }
 
   try {
-    // Get fresh access token
+    // Step 1: Get fresh access token
     const tokenRes = await fetch('https://accounts.zoho.in/oauth/v2/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -19,97 +19,67 @@ export default async function handler(req, res) {
     if (!tokenData.access_token) {
       return res.status(401).json({ error: 'Token refresh failed', details: tokenData });
     }
-    const token = tokenData.access_token;
-    const workspaceId = '172632000001964001';
-    const baseUrl = 'https://analyticsapi.zoho.in/restapi/v2';
-
+    const access_token = tokenData.access_token;
     const { source } = req.query;
-
-    // ── Helper: fetch a view by name using SQL ────────────────────────────────
-    async function queryView(viewName, sql) {
-      const url = `${baseUrl}/workspaces/${workspaceId}/views/${encodeURIComponent(viewName)}/data`;
-      const r = await fetch(`${url}?sqlQuery=${encodeURIComponent(sql)}&responseFormat=json`, {
-        headers: { Authorization: `Zoho-oauthtoken ${token}`, 'ZANALYTICS-ORGID': process.env.ZOHO_ORG_ID || '' }
-      });
-      return r.json();
-    }
-
-    // ── List all views in workspace ───────────────────────────────────────────
-    if (source === 'list_views') {
-      const r = await fetch(`${baseUrl}/workspaces/${workspaceId}/views`, {
-        headers: { Authorization: `Zoho-oauthtoken ${token}` }
-      });
-      const d = await r.json();
-      // Return just names and IDs for easy reading
-      const views = d.data?.views?.map(v => ({ id: v.viewId, name: v.viewName, type: v.viewType })) || d;
-      return res.json({ success: true, views });
-    }
 
     // ── CRM Deals ─────────────────────────────────────────────────────────────
     if (source === 'crm') {
-      const r = await fetch(
-        `${baseUrl}/workspaces/${workspaceId}/views/${encodeURIComponent('Deals (Zoho CRM)')}/data?responseFormat=json`,
-        { headers: { Authorization: `Zoho-oauthtoken ${token}` } }
-      );
-      const d = await r.json();
-      return res.json({ success: true, source: 'crm', data: d });
-    }
-
-    // ── Facebook/Meta Ads ─────────────────────────────────────────────────────
-    if (source === 'meta') {
-      const r = await fetch(
-        `${baseUrl}/workspaces/${workspaceId}/views/${encodeURIComponent('Campaign Insights (Facebook Ads)')}/data?responseFormat=json`,
-        { headers: { Authorization: `Zoho-oauthtoken ${token}` } }
-      );
-      const d = await r.json();
-      return res.json({ success: true, source: 'meta', data: d });
-    }
-
-    // ── LinkedIn Ads ──────────────────────────────────────────────────────────
-    if (source === 'linkedin') {
-      const r = await fetch(
-        `${baseUrl}/workspaces/${workspaceId}/views/${encodeURIComponent('Campaigns Performance (LinkedIn Ads)')}/data?responseFormat=json`,
-        { headers: { Authorization: `Zoho-oauthtoken ${token}` } }
-      );
-      const d = await r.json();
-      return res.json({ success: true, source: 'linkedin', data: d });
-    }
-
-    // ── Google Ads ────────────────────────────────────────────────────────────
-    if (source === 'google') {
-      const r = await fetch(
-        `${baseUrl}/workspaces/${workspaceId}/views/${encodeURIComponent('Campaign Performance (Google Ads)')}/data?responseFormat=json`,
-        { headers: { Authorization: `Zoho-oauthtoken ${token}` } }
-      );
-      const d = await r.json();
-      return res.json({ success: true, source: 'google', data: d });
+      let allDeals = [];
+      let page = 1;
+      while (true) {
+        const r = await fetch(
+          `https://www.zohoapis.in/crm/v3/Deals?fields=Deal_Name,Account_Name,Stage,Deal_Type_B2B_B2C_etc,Amount,Closing_Date,Created_Time,Owner&per_page=200&page=${page}`,
+          { headers: { Authorization: `Zoho-oauthtoken ${access_token}` } }
+        );
+        const d = await r.json();
+        if (!d.data || !d.data.length) break;
+        allDeals = [...allDeals, ...d.data];
+        if (!d.info?.more_records) break;
+        page++;
+      }
+      return res.json({ success: true, source: 'crm', count: allDeals.length, data: allDeals });
     }
 
     // ── Invoices ──────────────────────────────────────────────────────────────
     if (source === 'invoices') {
+      // Get org ID first
       const orgRes = await fetch('https://www.zohoapis.in/books/v3/organizations', {
-        headers: { Authorization: `Zoho-oauthtoken ${token}` }
+        headers: { Authorization: `Zoho-oauthtoken ${access_token}` }
       });
       const orgData = await orgRes.json();
       const orgId = orgData.organizations?.[0]?.organization_id;
-      if (!orgId) return res.status(400).json({ error: 'No org found' });
-      let all = [], page = 1;
+      if (!orgId) return res.status(400).json({ error: 'No org found', details: orgData });
+
+      // Fetch all invoices (no status filter — get all and filter in dashboard)
+      let allInvoices = [];
+      let page = 1;
       while (true) {
         const r = await fetch(
           `https://www.zohoapis.in/books/v3/invoices?organization_id=${orgId}&per_page=200&page=${page}`,
-          { headers: { Authorization: `Zoho-oauthtoken ${token}` } }
+          { headers: { Authorization: `Zoho-oauthtoken ${access_token}` } }
         );
         const d = await r.json();
-        if (!d.invoices?.length) break;
-        all = [...all, ...d.invoices];
+        if (!d.invoices || !d.invoices.length) break;
+        allInvoices = [...allInvoices, ...d.invoices];
         if (!d.page_context?.has_more_page) break;
         page++;
       }
-      return res.json({ success: true, source: 'invoices', count: all.length, data: all });
+      return res.json({ success: true, source: 'invoices', count: allInvoices.length, data: allInvoices });
     }
 
-    // ── Default: test connection ──────────────────────────────────────────────
-    return res.json({ success: true, message: 'Zoho API connected!', workspace: workspaceId });
+    // ── Zoho Analytics ────────────────────────────────────────────────────────
+    if (source === 'analytics') {
+      const { workspace, view } = req.query;
+      if (!workspace || !view) return res.status(400).json({ error: 'workspace and view required' });
+      const email = encodeURIComponent(process.env.ZOHO_EMAIL);
+      const url = `https://analyticsapi.zoho.in/api/${email}/${encodeURIComponent(workspace)}/${encodeURIComponent(view)}?ZOHO_ACTION=EXPORT&ZOHO_OUTPUT_FORMAT=JSON&ZOHO_API_VERSION=1.0`;
+      const r = await fetch(url, { headers: { Authorization: `Zoho-oauthtoken ${access_token}` } });
+      const d = await r.json();
+      return res.json({ success: true, source: 'analytics', data: d });
+    }
+
+    // ── Default: verify connection ────────────────────────────────────────────
+    return res.json({ success: true, message: 'Zoho API connected!', token_type: tokenData.token_type });
 
   } catch (err) {
     return res.status(500).json({ error: err.message });
