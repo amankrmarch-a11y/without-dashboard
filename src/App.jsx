@@ -1027,6 +1027,19 @@ export default function App() {
       const clickCol = findCol(sample, ...clickCols);
       const imprCol  = findCol(sample, ...impressionCols);
       const leadCol  = findCol(sample, ...leadCols);
+
+      // Strip ALL currency symbols — $, ₹, £, €, "INR ", "USD " — treat everything as INR
+      const stripCurrency = v => {
+        if(v===undefined||v===null||v==='') return 0;
+        const clean = String(v)
+          .replace(/\bINR\b|\bUSD\b|\bEUR\b/gi, '')  // word-level currency codes
+          .replace(/[$₹£€]/g, '')                     // currency symbols
+          .replace(/%/g, '')                           // percent signs
+          .replace(/,/g, '')                           // commas
+          .trim();
+        return parseFloat(clean)||0;
+      };
+
       const byMonth = {};
       rows.forEach(r => {
         const dateRaw  = dateCol ? r[dateCol] : '';
@@ -1036,7 +1049,9 @@ export default function App() {
         const month = MONTHS[mi];
         const yearMonth = normDate.slice(0,7);
         if(!byMonth[yearMonth]) byMonth[yearMonth]={month,yearMonth,spend:0,impressions:0,clicks:0,leads:0,reach:0};
-        byMonth[yearMonth].spend       += spendCol ? smartParseNum(r[spendCol]) : 0;
+        // Spend: strip all currency symbols, treat as INR
+        byMonth[yearMonth].spend       += spendCol ? stripCurrency(r[spendCol]) : 0;
+        // Other metrics: plain numbers only
         byMonth[yearMonth].impressions += imprCol  ? (parseFloat(String(r[imprCol]||'').replace(/,/g,''))||0) : 0;
         byMonth[yearMonth].clicks      += clickCol ? (parseFloat(String(r[clickCol]||'').replace(/,/g,''))||0) : 0;
         byMonth[yearMonth].leads       += leadCol  ? (parseFloat(String(r[leadCol]||'').replace(/,/g,''))||0) : 0;
@@ -1107,34 +1122,42 @@ export default function App() {
       } else results.push(`⚠️ Invoices: ${json.invoices?.count===0?'no data':'failed'}`);
 
       // ── Parse Meta ─────────────────────────────────────────────────────────
+      // Exact columns: Reporting Starts, Amount Spent ($=INR), Clicks (All), Impressions, Leads (Form)/Leads
       if(json.meta?.data?.length) {
         const monthly = parseAdsRows(json.meta.data,
-          ['Amount Spent'],['Clicks (All)','Link Clicks','Clicks'],
-          ['Impressions'],['Leads','Leads (Form)','Results'],
-          ['Reporting Starts','Date','date']);
-        if(monthly.length>0){ setLive(prev=>({...prev,meta:monthly})); results.push(`✅ Meta: ${monthly.length} months`); }
-        else results.push(`⚠️ Meta: 0 months`);
+          ['Amount Spent'],                                    // spend: $45.66 = INR
+          ['Clicks (All)', 'Link Clicks', 'Clicks'],           // clicks: plain number
+          ['Impressions'],                                     // impressions: plain number
+          ['Leads (Form)', 'Leads', 'Results'],                // leads: plain number
+          ['Reporting Starts', 'Reporting Ends', 'Date']);
+        if(monthly.length>0){ setLive(prev=>({...prev,meta:monthly})); results.push(`✅ Meta: ${monthly.length} months · ₹${monthly.reduce((s,r)=>s+r.spend,0).toLocaleString('en-IN')}`); }
+        else results.push(`⚠️ Meta: 0 months — check columns`);
       } else results.push(`⚠️ Meta: no data`);
 
       // ── Parse LinkedIn ─────────────────────────────────────────────────────
+      // Exact columns: Date, Cost In Local Currency (INR 1141.94), Clicks, Impressions, One Click Leads
       if(json.linkedin?.data?.length) {
         const monthly = parseAdsRows(json.linkedin.data,
-          ['Cost In Local Currency','Cost In Usd','Total Spent','Spend'],
-          ['Clicks','Action Clicks'],['Impressions','Card Impressions'],
-          ['One Click Leads','Leads','External Website Conversions'],
-          ['Date','date']);
-        if(monthly.length>0){ setLive(prev=>({...prev,linkedin:monthly})); results.push(`✅ LinkedIn: ${monthly.length} months`); }
-        else results.push(`⚠️ LinkedIn: 0 months`);
+          ['Cost In Local Currency', 'Cost In Usd', 'Total Spent'], // spend: "INR 1,141.94"
+          ['Clicks', 'Card Clicks', 'Action Clicks'],                 // clicks: plain number
+          ['Impressions', 'Card Impressions'],                        // impressions: plain number
+          ['One Click Leads', 'Leads', 'External Website Conversions'],
+          ['Date']);
+        if(monthly.length>0){ setLive(prev=>({...prev,linkedin:monthly})); results.push(`✅ LinkedIn: ${monthly.length} months · ₹${monthly.reduce((s,r)=>s+r.spend,0).toLocaleString('en-IN')}`); }
+        else results.push(`⚠️ LinkedIn: 0 months — check columns`);
       } else results.push(`⚠️ LinkedIn: no data`);
 
       // ── Parse Google ───────────────────────────────────────────────────────
+      // Exact columns: Day (YYYY-MM-DD), Costs ($=INR), Clicks, Impressions, Conversions
       if(json.google?.data?.length) {
         const monthly = parseAdsRows(json.google.data,
-          ['Costs','Cost','Spend'],['Clicks','Interactions'],
-          ['Impressions'],['Conversions','All Conversions'],
-          ['Day','Date','date']);
-        if(monthly.length>0){ setLive(prev=>({...prev,google:monthly})); results.push(`✅ Google: ${monthly.length} months`); }
-        else results.push(`⚠️ Google: 0 months`);
+          ['Costs'],                                           // spend: $225.49 = INR
+          ['Clicks', 'Interactions'],                         // clicks: plain number
+          ['Impressions'],                                     // impressions: plain number
+          ['Conversions', 'All Conversions'],                  // leads: plain decimal
+          ['Day']);
+        if(monthly.length>0){ setLive(prev=>({...prev,google:monthly})); results.push(`✅ Google: ${monthly.length} months · ₹${monthly.reduce((s,r)=>s+r.spend,0).toLocaleString('en-IN')}`); }
+        else results.push(`⚠️ Google: 0 months — check columns`);
       } else results.push(`⚠️ Google: no data`);
 
       setZohoLastSync(new Date().toLocaleString('en-IN'));
