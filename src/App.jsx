@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import {
   PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip,
   ResponsiveContainer, Legend, LineChart, Line, CartesianGrid,
+  AreaChart, Area,
 } from "recharts";
 
 // ─── CDN libs ─────────────────────────────────────────────────────────────────
@@ -700,6 +701,15 @@ function exportToPDF(params) {
 
 // ─── In-memory storage (localStorage not available in artifact sandbox) ─────────
 const EMPTY_LIVE = {meta:[],linkedin:[],google:[],metaCamp:[],liCamp:[],googleCamp:[]};
+const EMPTY_SOCIAL = {
+  igFollowers:0, igFollowing:0, igMedia:0, igUsername:'',
+  igReach:[],           // [{date, reach}] daily
+  liFollowers:[],       // [{date, followers}] by date
+  liPageStats:[],       // [{date, impressions, clicks, engagement}]
+  liPostInsights:[],    // [{date, title, impressions, clicks, engagement}]
+  liIndustries:[],      // [{industry, count}]
+  liTotalFollowers:0,
+};
 const EMPTY_INV = []; // flat array of deduplicated B2B invoices
 const EMPTY_CRM = []; // flat array of CRM deals
 // Safe localStorage wrapper — silently degrades if unavailable
@@ -920,6 +930,10 @@ export default function App() {
 
   // ── Live data (ad spend) ──────────────────────────────────────────────────
   const[liveData,setLive]=useState(()=>lsGet("wo_liveData",EMPTY_LIVE));
+  const[socialData,setSocial]=useState(()=>lsGet("wo_social",EMPTY_SOCIAL));
+  useEffect(()=>{ lsSave("wo_social",socialData); },[socialData]);
+  const[socFromDate,setSocFromDate]=useState("");
+  const[socToDate,setSocToDate]=useState("");
   const[folders,setFolders]=useState(()=>lsGet("wo_folders",[]));
   useEffect(()=>{ lsSave("wo_liveData",liveData); },[liveData]);
   useEffect(()=>{ lsSave("wo_folders",folders); },[folders]);
@@ -1166,6 +1180,79 @@ export default function App() {
         if(monthly.length>0){ setLive(prev=>({...prev,google:monthly})); results.push(`✅ Google: ${monthly.length} months · ₹${monthly.reduce((s,r)=>s+r.spend,0).toLocaleString('en-IN')}`); }
         else results.push(`⚠️ Google: 0 months — check columns`);
       } else results.push(`⚠️ Google: no data`);
+
+      // ── Parse Instagram (from Zoho Analytics) ────────────────────────────
+      // Instagram view IDs — update these with real IDs from list_views
+      // For now, parse from the data if available in json
+      if(json.ig_insights?.data?.length) {
+        const rows = json.ig_insights.data;
+        const reach = rows.map(r => ({
+          date: r['End Time']||r['end_time']||r['Date']||'',
+          reach: parseFloat(String(r['Reach']||r['reach']||0).replace(/,/g,''))||0,
+        })).filter(r=>r.date&&r.reach>0).sort((a,b)=>a.date.localeCompare(b.date));
+        setSocial(prev=>({...prev, igReach:reach}));
+        results.push(`✅ IG Reach: ${reach.length} days`);
+      }
+      if(json.ig_info?.data?.length) {
+        const r = json.ig_info.data[0];
+        setSocial(prev=>({...prev,
+          igFollowers:parseFloat(String(r['Followers']||0).replace(/,/g,''))||0,
+          igFollowing:parseFloat(String(r['Follows']||r['Following']||0).replace(/,/g,''))||0,
+          igMedia:parseFloat(String(r['Media']||0).replace(/,/g,''))||0,
+          igUsername:r['Username']||'',
+        }));
+        results.push(`✅ IG Profile synced`);
+      }
+
+      // ── Parse LinkedIn Pages (Page Stats + Followers) ──────────────────────
+      if(json.li_page_stats?.data?.length) {
+        const rows = json.li_page_stats.data;
+        const stats = rows.map(r => ({
+          date: r['Date']||r['date']||r['End Date']||'',
+          impressions: parseFloat(String(r['Impressions']||r['Page Views - Total']||0).replace(/,/g,''))||0,
+          clicks: parseFloat(String(r['Clicks']||r['Total Clicks']||0).replace(/,/g,''))||0,
+          engagement: parseFloat(String(r['Engagement']||r['Total Engagements']||0).replace(/,/g,''))||0,
+          uniqueVisitors: parseFloat(String(r['Unique Visitors']||0).replace(/,/g,''))||0,
+        })).filter(r=>r.date).sort((a,b)=>a.date.localeCompare(b.date));
+        setSocial(prev=>({...prev, liPageStats:stats}));
+        results.push(`✅ LI Page Stats: ${stats.length} days`);
+      }
+      if(json.li_followers?.data?.length) {
+        const rows = json.li_followers.data;
+        const latest = rows.reduce((max,r) => {
+          const n = parseFloat(String(r['Followers Count']||r['Total Followers']||r['Follower Count']||0).replace(/,/g,''))||0;
+          return n > max ? n : max;
+        }, 0);
+        const byDate = rows.map(r=>({
+          date: r['Date']||r['date']||'',
+          followers: parseFloat(String(r['Followers Count']||r['Total Followers']||r['Follower Count']||0).replace(/,/g,''))||0,
+        })).filter(r=>r.date&&r.followers>0).sort((a,b)=>a.date.localeCompare(b.date));
+        setSocial(prev=>({...prev, liFollowers:byDate, liTotalFollowers:latest}));
+        results.push(`✅ LI Followers: ${byDate.length} entries`);
+      }
+      if(json.li_posts?.data?.length) {
+        const rows = json.li_posts.data;
+        const posts = rows.map(r=>({
+          date: r['Date']||r['Created At']||r['Published At']||'',
+          title: r['Post Text']||r['Title']||r['Content']||'Post',
+          impressions: parseFloat(String(r['Impressions']||0).replace(/,/g,''))||0,
+          clicks: parseFloat(String(r['Clicks']||0).replace(/,/g,''))||0,
+          engagement: parseFloat(String(r['Engagement Rate']||r['Engagement']||0).replace(/,/g,''))||0,
+          likes: parseFloat(String(r['Likes']||0).replace(/,/g,''))||0,
+          comments: parseFloat(String(r['Comments']||0).replace(/,/g,''))||0,
+        })).filter(r=>r.date||r.impressions>0).sort((a,b)=>(b.impressions||0)-(a.impressions||0));
+        setSocial(prev=>({...prev, liPostInsights:posts}));
+        results.push(`✅ LI Posts: ${posts.length}`);
+      }
+      if(json.li_industries?.data?.length) {
+        const rows = json.li_industries.data;
+        const industries = rows.map(r=>({
+          industry: r['Industry']||r['Function']||r['Seniority']||'Unknown',
+          count: parseFloat(String(r['Follower Count']||r['Count']||0).replace(/,/g,''))||0,
+        })).filter(r=>r.count>0).sort((a,b)=>b.count-a.count).slice(0,10);
+        setSocial(prev=>({...prev, liIndustries:industries}));
+        results.push(`✅ LI Industries: ${industries.length}`);
+      }
 
       setZohoLastSync(new Date().toLocaleString('en-IN'));
       lsSave("wo_last_sync_ts", Date.now());
@@ -1423,6 +1510,7 @@ export default function App() {
   const NAV=[
     {id:"home",    icon:"⬡",  label:"Overview"},
     {id:"ads",     icon:"📊", label:"Ad Spend"},
+    {id:"socials", icon:"◎",  label:"Socials"},
     {id:"crm",     icon:"◈",  label:"CRM"},
     {id:"invoices",icon:"₹",  label:"Invoices"},
     {id:"estimate",icon:"◎",  label:"Estimate"},
@@ -2096,6 +2184,261 @@ export default function App() {
         )}
 
         {/* ══ UPLOAD ════════════════════════════════════════════════════════ */}
+
+        {/* ══ SOCIALS ════════════════════════════════════════════════════════ */}
+        {page==="socials"&&(()=>{
+          const { igFollowers, igFollowing, igMedia, igUsername, igReach,
+                  liFollowers, liPageStats, liPostInsights, liIndustries,
+                  liTotalFollowers } = socialData;
+
+          const hasSocial = igFollowers>0||liTotalFollowers>0||igReach.length>0||liPageStats.length>0;
+
+          // ── Date filter ──────────────────────────────────────────────────────
+          const inSocRange = dateStr => {
+            if(!socFromDate&&!socToDate) return true;
+            if(!dateStr) return false;
+            const d = String(dateStr).slice(0,10);
+            if(socFromDate && d < socFromDate) return false;
+            if(socToDate   && d > socToDate)   return false;
+            return true;
+          };
+
+          // ── Instagram aggregates ─────────────────────────────────────────────
+          const igFiltered = igReach.filter(r=>inSocRange(r.date));
+          const igTotalReach = igFiltered.reduce((s,r)=>s+r.reach, 0);
+          const igAvgReach   = igFiltered.length ? Math.round(igTotalReach/igFiltered.length) : 0;
+          const igPeakDay    = igFiltered.reduce((max,r)=>r.reach>max.reach?r:max, {date:'',reach:0});
+          // Monthly rollup for Instagram
+          const igByMonth = {};
+          igFiltered.forEach(r => {
+            const ym = String(r.date).slice(0,7);
+            if(!igByMonth[ym]) igByMonth[ym] = {month:ymLabel(ym), reach:0, days:0};
+            igByMonth[ym].reach += r.reach;
+            igByMonth[ym].days++;
+          });
+          const igMonthData = Object.values(igByMonth).sort((a,b)=>a.month.localeCompare(b.month));
+
+          // ── LinkedIn aggregates ──────────────────────────────────────────────
+          const liFiltered  = liPageStats.filter(r=>inSocRange(r.date));
+          const liTotalImpr = liFiltered.reduce((s,r)=>s+r.impressions, 0);
+          const liTotalClicks = liFiltered.reduce((s,r)=>s+r.clicks, 0);
+          const liCTR = liTotalImpr>0 ? parseFloat(((liTotalClicks/liTotalImpr)*100).toFixed(2)) : 0;
+          const liAvgEng = liFiltered.length ? parseFloat((liFiltered.reduce((s,r)=>s+r.engagement,0)/liFiltered.length).toFixed(2)) : 0;
+          // LinkedIn follower growth
+          const liFolFiltered = liFollowers.filter(r=>inSocRange(r.date));
+          const liLatest = liFolFiltered.length ? liFolFiltered[liFolFiltered.length-1].followers : liTotalFollowers;
+          const liFirst  = liFolFiltered.length ? liFolFiltered[0].followers : liTotalFollowers;
+          const liGrowth = liFirst>0 ? parseFloat(((liLatest-liFirst)/liFirst*100).toFixed(1)) : 0;
+
+          return(
+          <div style={{display:"flex",flexDirection:"column",gap:18}}>
+
+            {/* Header */}
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+              <div>
+                <div style={{fontSize:10,color:C.muted,textTransform:"uppercase",letterSpacing:2,fontWeight:700,marginBottom:2}}>Without® · Social Media</div>
+                <h1 style={{fontSize:20,fontWeight:800,letterSpacing:-0.5}}>Socials</h1>
+              </div>
+              <DatePill from={socFromDate} setFrom={setSocFromDate} to={socToDate} setTo={setSocToDate}/>
+            </div>
+
+            {/* Empty state */}
+            {!hasSocial&&(
+              <div style={{background:C.card,border:`2px dashed ${C.border}`,borderRadius:14,padding:"52px 24px",textAlign:"center",display:"flex",flexDirection:"column",alignItems:"center",gap:12}}>
+                <div style={{fontSize:32}}>📱</div>
+                <div style={{fontWeight:700,fontSize:15,color:C.text}}>No social data yet</div>
+                <div style={{fontSize:12.5,color:C.muted,maxWidth:480,lineHeight:1.7}}>
+                  Social data syncs automatically from Zoho Analytics. The Instagram and LinkedIn Pages views need to be connected — see setup instructions below.
+                </div>
+                <div style={{background:C.cardAlt,border:`1px solid ${C.border}`,borderRadius:10,padding:"14px 20px",maxWidth:520,textAlign:"left",fontSize:11.5,lineHeight:1.8,color:C.sub}}>
+                  <b>Setup:</b> Visit <code style={{background:C.bg,padding:"1px 5px",borderRadius:3,fontSize:10}}>without-dashboard.vercel.app/api/zoho?source=list_views</code> to get view IDs, then update the API with:<br/>
+                  <code style={{fontSize:10,color:C.accent}}>ig_insights, ig_info, li_page_stats, li_followers, li_posts, li_industries</code>
+                </div>
+              </div>
+            )}
+
+            {hasSocial&&(<>
+
+            {/* ── Top KPI row ─────────────────────────────────────────────────── */}
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:10}}>
+              {[
+                {label:"Instagram Followers", val:igFollowers>0?fmtNum(igFollowers):"—",    icon:"📸", col:"#e1306c", sub:igUsername?`@${igUsername}`:undefined},
+                {label:"IG Reach (period)",   val:igTotalReach>0?fmtNum(igTotalReach):"—",  icon:"👁",  col:"#f77737", sub:igAvgReach>0?`avg ${fmtNum(igAvgReach)}/day`:undefined},
+                {label:"IG Posts",            val:igMedia>0?String(igMedia):"—",            icon:"🖼",  col:"#833ab4", sub:igFollowing>0?`${fmtNum(igFollowing)} following`:undefined},
+                {label:"LinkedIn Followers",  val:liLatest>0?fmtNum(liLatest):"—",          icon:"💼",  col:"#0a66c2", sub:liGrowth!==0?`${liGrowth>=0?"+":""}${liGrowth}% in period`:undefined},
+                {label:"LI Impressions",      val:liTotalImpr>0?fmtNum(liTotalImpr):"—",    icon:"📊",  col:"#0a66c2", sub:liCTR>0?`${liCTR}% CTR`:undefined},
+                {label:"LI Clicks",           val:liTotalClicks>0?fmtNum(liTotalClicks):"—",icon:"🖱",  col:"#0a66c2"},
+              ].map(k=>(
+                <div key={k.label} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:14,padding:"16px 18px",boxShadow:"0 2px 8px rgba(26,26,46,0.06)"}}>
+                  <div style={{fontSize:9,color:C.muted,textTransform:"uppercase",letterSpacing:1.2,fontWeight:700,marginBottom:6}}>{k.label}</div>
+                  <div style={{fontSize:24,fontWeight:800,color:k.val==="—"?C.muted:k.col,fontFamily:"'DM Mono',monospace",letterSpacing:-0.5}}>{k.val}</div>
+                  {k.sub&&<div style={{fontSize:10,color:C.muted,marginTop:4}}>{k.sub}</div>}
+                </div>
+              ))}
+            </div>
+
+            {/* ── Instagram section ────────────────────────────────────────────── */}
+            <div>
+              <SectionHead title="Instagram" sub={igUsername?`@${igUsername} · shop.without`:"Profile reach & growth"}/>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))",gap:12}}>
+
+                {/* Daily reach chart */}
+                {igFiltered.length>0&&(
+                <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:14,padding:"18px",boxShadow:"0 2px 8px rgba(26,26,46,0.06)"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                    <div>
+                      <div style={{fontSize:11,fontWeight:700,color:C.text}}>Daily Reach</div>
+                      <div style={{fontSize:10,color:C.muted,marginTop:2}}>{igFiltered.length} days · {igPeakDay.reach>0?`peak ${fmtNum(igPeakDay.reach)} on ${igPeakDay.date.slice(5)}`:""}</div>
+                    </div>
+                    <div style={{textAlign:"right"}}>
+                      <div style={{fontSize:11,fontWeight:800,color:"#e1306c",fontFamily:"'DM Mono',monospace"}}>{fmtNum(igTotalReach)}</div>
+                      <div style={{fontSize:9,color:C.muted}}>total reach</div>
+                    </div>
+                  </div>
+                  <ResponsiveContainer width="100%" height={160}>
+                    <AreaChart data={igFiltered.slice(-90)}>
+                      <defs>
+                        <linearGradient id="igGrad" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#e1306c" stopOpacity={0.3}/>
+                          <stop offset="95%" stopColor="#e1306c" stopOpacity={0}/>
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke={C.border} vertical={false}/>
+                      <XAxis dataKey="date" tick={{fill:C.muted,fontSize:9}} axisLine={false} tickLine={false}
+                        tickFormatter={d=>d.slice(5)} interval={Math.floor(igFiltered.length/4)}/>
+                      <YAxis tickFormatter={v=>fmtNum(v)} tick={{fill:C.muted,fontSize:9}} axisLine={false} tickLine={false} width={40}/>
+                      <Tooltip formatter={v=>[fmtNum(v),"Reach"]} contentStyle={{background:C.card,border:`1px solid ${C.border}`,borderRadius:8,fontSize:11}}/>
+                      <Area type="monotone" dataKey="reach" stroke="#e1306c" strokeWidth={2} fill="url(#igGrad)" dot={false}/>
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+                )}
+
+                {/* Monthly reach */}
+                {igMonthData.length>0&&(
+                <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:14,padding:"18px",boxShadow:"0 2px 8px rgba(26,26,46,0.06)"}}>
+                  <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:12}}>Monthly Reach</div>
+                  <ResponsiveContainer width="100%" height={160}>
+                    <BarChart data={igMonthData} barSize={20}>
+                      <CartesianGrid strokeDasharray="3 3" stroke={C.border} vertical={false}/>
+                      <XAxis dataKey="month" tick={{fill:C.muted,fontSize:10}} axisLine={false} tickLine={false}/>
+                      <YAxis tickFormatter={v=>fmtNum(v)} tick={{fill:C.muted,fontSize:9}} axisLine={false} tickLine={false} width={42}/>
+                      <Tooltip formatter={v=>[fmtNum(v),"Reach"]} contentStyle={{background:C.card,border:`1px solid ${C.border}`,borderRadius:8,fontSize:11}}/>
+                      <Bar dataKey="reach" fill="#e1306c" radius={[5,5,0,0]} name="Reach"/>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+                )}
+              </div>
+            </div>
+
+            {/* ── LinkedIn Pages section ───────────────────────────────────────── */}
+            {(liTotalImpr>0||liTotalFollowers>0||liLatest>0)&&(
+            <div>
+              <SectionHead title="LinkedIn Pages" sub="page performance · organic growth"/>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))",gap:12}}>
+
+                {/* Page impressions over time */}
+                {liFiltered.length>0&&(
+                <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:14,padding:"18px",boxShadow:"0 2px 8px rgba(26,26,46,0.06)"}}>
+                  <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:12}}>Page Impressions</div>
+                  <ResponsiveContainer width="100%" height={160}>
+                    <AreaChart data={liFiltered}>
+                      <defs>
+                        <linearGradient id="liGrad" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#0a66c2" stopOpacity={0.25}/>
+                          <stop offset="95%" stopColor="#0a66c2" stopOpacity={0}/>
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke={C.border} vertical={false}/>
+                      <XAxis dataKey="date" tick={{fill:C.muted,fontSize:9}} axisLine={false} tickLine={false}
+                        tickFormatter={d=>String(d).slice(5)} interval={Math.max(1,Math.floor(liFiltered.length/5))}/>
+                      <YAxis tickFormatter={v=>fmtNum(v)} tick={{fill:C.muted,fontSize:9}} axisLine={false} tickLine={false} width={40}/>
+                      <Tooltip formatter={(v,n)=>[fmtNum(v),n]} contentStyle={{background:C.card,border:`1px solid ${C.border}`,borderRadius:8,fontSize:11}}/>
+                      <Area type="monotone" dataKey="impressions" stroke="#0a66c2" strokeWidth={2} fill="url(#liGrad)" dot={false} name="Impressions"/>
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+                )}
+
+                {/* Follower growth */}
+                {liFolFiltered.length>0&&(
+                <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:14,padding:"18px",boxShadow:"0 2px 8px rgba(26,26,46,0.06)"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                    <div style={{fontSize:11,fontWeight:700,color:C.text}}>Follower Growth</div>
+                    <span style={{fontSize:11,fontWeight:800,color:"#0a66c2",fontFamily:"'DM Mono',monospace"}}>{fmtNum(liLatest)}</span>
+                  </div>
+                  <ResponsiveContainer width="100%" height={160}>
+                    <AreaChart data={liFolFiltered}>
+                      <defs>
+                        <linearGradient id="liFolGrad" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#0a66c2" stopOpacity={0.2}/>
+                          <stop offset="95%" stopColor="#0a66c2" stopOpacity={0}/>
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke={C.border} vertical={false}/>
+                      <XAxis dataKey="date" tick={{fill:C.muted,fontSize:9}} axisLine={false} tickLine={false}
+                        tickFormatter={d=>String(d).slice(5)} interval={Math.max(1,Math.floor(liFolFiltered.length/5))}/>
+                      <YAxis tickFormatter={v=>fmtNum(v)} tick={{fill:C.muted,fontSize:9}} axisLine={false} tickLine={false} width={40}/>
+                      <Tooltip formatter={v=>[fmtNum(v),"Followers"]} contentStyle={{background:C.card,border:`1px solid ${C.border}`,borderRadius:8,fontSize:11}}/>
+                      <Area type="monotone" dataKey="followers" stroke="#0a66c2" strokeWidth={2} fill="url(#liFolGrad)" dot={false} name="Followers"/>
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+                )}
+
+                {/* Industries breakdown */}
+                {liIndustries.length>0&&(
+                <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:14,padding:"18px",boxShadow:"0 2px 8px rgba(26,26,46,0.06)"}}>
+                  <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:14}}>Audience by Industry <span style={{fontSize:10,color:C.muted,fontWeight:400}}>LinkedIn followers</span></div>
+                  {liIndustries.map((ind,i)=>{
+                    const max = liIndustries[0].count;
+                    return(
+                    <div key={ind.industry} style={{marginBottom:10}}>
+                      <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+                        <span style={{fontSize:11,color:C.text,fontWeight:600}}>{ind.industry}</span>
+                        <span style={{fontSize:11,fontWeight:800,color:"#0a66c2",fontFamily:"'DM Mono',monospace"}}>{fmtNum(ind.count)}</span>
+                      </div>
+                      <div style={{background:C.border,borderRadius:3,height:5,overflow:"hidden"}}>
+                        <div style={{height:"100%",background:"#0a66c2",borderRadius:3,width:`${max?((ind.count/max)*100):0}%`,transition:"width .4s"}}/>
+                      </div>
+                    </div>
+                    );
+                  })}
+                </div>
+                )}
+
+                {/* Top posts */}
+                {liPostInsights.length>0&&(
+                <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:14,padding:"18px",boxShadow:"0 2px 8px rgba(26,26,46,0.06)"}}>
+                  <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:14}}>Top Posts <span style={{fontSize:10,color:C.muted,fontWeight:400}}>by impressions</span></div>
+                  <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                    {liPostInsights.slice(0,5).map((p,i)=>(
+                      <div key={i} style={{display:"flex",gap:10,alignItems:"flex-start",padding:"10px 12px",background:C.cardAlt,borderRadius:10}}>
+                        <div style={{width:22,height:22,borderRadius:6,background:i===0?"#0a66c2":C.border,color:i===0?"#fff":C.muted,display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:800,flexShrink:0}}>{i+1}</div>
+                        <div style={{flex:1,minWidth:0}}>
+                          <div style={{fontSize:11,color:C.text,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.title}</div>
+                          <div style={{display:"flex",gap:12,marginTop:4}}>
+                            {p.impressions>0&&<span style={{fontSize:10,color:C.muted}}>👁 {fmtNum(p.impressions)}</span>}
+                            {p.clicks>0&&<span style={{fontSize:10,color:C.muted}}>🖱 {fmtNum(p.clicks)}</span>}
+                            {p.likes>0&&<span style={{fontSize:10,color:C.muted}}>❤ {fmtNum(p.likes)}</span>}
+                            {p.date&&<span style={{fontSize:10,color:C.muted}}>{String(p.date).slice(0,10)}</span>}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                )}
+              </div>
+            </div>
+            )}
+
+            </>)}
+          </div>
+          );
+        })()}
+
 
         {page==="crm"&&(()=>{
           const hasCrm = crmData.length > 0;
