@@ -994,8 +994,10 @@ export default function App() {
     // Only auto-sync if we haven't synced in the last 30 minutes
     const lastSyncTime = lsGet("wo_last_sync_ts", 0);
     const twelveHours = 12 * 60 * 60 * 1000;
-    if(Date.now() - lastSyncTime > twelveHours) {
-      // Small delay so the page renders first before hitting the API
+    // Also force sync if social data is missing (new feature added)
+    const socialCache = lsGet("wo_social", null);
+    const socialEmpty = !socialCache || (!socialCache.igFollowers && !socialCache.liTotalFollowers && !socialCache.igReach?.length);
+    if(Date.now() - lastSyncTime > twelveHours || socialEmpty) {
       setTimeout(() => syncZoho(), 1500);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2292,16 +2294,22 @@ export default function App() {
 
             {/* Empty state */}
             {!hasSocial&&(
-              <div style={{background:C.card,border:`2px dashed ${C.border}`,borderRadius:14,padding:"52px 24px",textAlign:"center",display:"flex",flexDirection:"column",alignItems:"center",gap:12}}>
-                <div style={{fontSize:32}}>📱</div>
-                <div style={{fontWeight:700,fontSize:15,color:C.text}}>No social data yet</div>
-                <div style={{fontSize:12.5,color:C.muted,maxWidth:480,lineHeight:1.7}}>
-                  Social data syncs automatically from Zoho Analytics. The Instagram and LinkedIn Pages views need to be connected — see setup instructions below.
+              <div style={{background:C.card,border:`2px dashed ${C.border}`,borderRadius:14,padding:"52px 24px",textAlign:"center",display:"flex",flexDirection:"column",alignItems:"center",gap:14}}>
+                <div style={{fontSize:40}}>📱</div>
+                <div style={{fontWeight:800,fontSize:16,color:C.text}}>No social data yet</div>
+                <div style={{fontSize:12.5,color:C.muted,maxWidth:440,lineHeight:1.7}}>
+                  Click Sync Now to pull Instagram and LinkedIn Pages data from Zoho Analytics.
                 </div>
-                <div style={{background:C.cardAlt,border:`1px solid ${C.border}`,borderRadius:10,padding:"14px 20px",maxWidth:520,textAlign:"left",fontSize:11.5,lineHeight:1.8,color:C.sub}}>
-                  <b>Setup:</b> Visit <code style={{background:C.bg,padding:"1px 5px",borderRadius:3,fontSize:10}}>without-dashboard.vercel.app/api/zoho?source=list_views</code> to get view IDs, then update the API with:<br/>
-                  <code style={{fontSize:10,color:C.accent}}>ig_insights, ig_info, li_page_stats, li_followers, li_posts, li_industries</code>
-                </div>
+                <button onClick={syncZoho} disabled={zohoSyncing}
+                  style={{background:zohoSyncing?"rgba(26,26,46,0.1)":C.primary,color:zohoSyncing?C.muted:"#fff",
+                    border:"none",borderRadius:10,padding:"10px 28px",fontSize:13,fontWeight:700,cursor:zohoSyncing?"not-allowed":"pointer",
+                    display:"flex",alignItems:"center",gap:6,transition:"all .2s"}}>
+                  {zohoSyncing
+                    ? <><span style={{display:"inline-block",animation:"spin 1s linear infinite"}}>⟳</span> Syncing all sources...</>
+                    : <><span>⚡</span> Sync Now</>}
+                </button>
+                {zohoSyncStatus&&<div style={{fontSize:11,color:C.accent,maxWidth:500,lineHeight:1.5}}>{zohoSyncStatus}</div>}
+                {zohoLastSync&&<div style={{fontSize:10,color:C.muted}}>Last sync: {zohoLastSync}</div>}
               </div>
             )}
 
