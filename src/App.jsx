@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect, useMemo } from "react";
+import { useState, useRef, useCallback, useEffect, useMemo, Component } from "react";
 import {
   PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip,
   ResponsiveContainer, Legend, LineChart, Line, CartesianGrid,
@@ -33,6 +33,26 @@ function useLibsReady() {
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 // ─── Theme tokens (light & dark) ─────────────────────────────────────────────
+// ── Error Boundary — prevents white screens from JS errors ──────────────────
+class ErrorBoundary extends Component {
+  constructor(p){super(p); this.state={error:null};}
+  static getDerivedStateFromError(e){return {error:e};}
+  render(){
+    if(this.state.error) return(
+      <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#f2f4f0",flexDirection:"column",gap:16,padding:32}}>
+        <div style={{fontSize:32}}>⚠️</div>
+        <div style={{fontSize:18,fontWeight:700,color:"#1a1a2e"}}>Something went wrong</div>
+        <div style={{fontSize:13,color:"#666",maxWidth:400,textAlign:"center",lineHeight:1.6}}>{this.state.error.message}</div>
+        <button onClick={()=>{localStorage.clear();window.location.reload();}}
+          style={{background:"#1a1a2e",color:"#fff",border:"none",borderRadius:8,padding:"10px 24px",fontSize:13,fontWeight:700,cursor:"pointer"}}>
+          Clear cache & reload
+        </button>
+      </div>
+    );
+    return this.props.children;
+  }
+}
+
 const THEMES = {
   light: {
     // Without® brand: deep void nav, lime-green accent, clean off-white bg
@@ -702,13 +722,13 @@ function exportToPDF(params) {
 // ─── In-memory storage (localStorage not available in artifact sandbox) ─────────
 const EMPTY_LIVE = {meta:[],linkedin:[],google:[],metaCamp:[],liCamp:[],googleCamp:[]};
 const EMPTY_SOCIAL = {
-  igFollowers:0, igFollowing:0, igMedia:0, igUsername:'',
-  igReach:[],        // [{date, reach}] daily
-  igMedia2:[],       // [{timestamp, hour, dayOfWeek, impressions, likes, comments, saves}]
+  igFollowers:0, igFollowing:0, igMediaCount:0, igUsername:'',
+  igReach:[],        // [{date, reach}]
+  igPosts:[],        // [{timestamp, hour, dayOfWeek, impressions, likes, comments}]
   igReels:[],        // [{timestamp, plays, reach, likes}]
   liFollowers:[],    // [{date, followers}]
   liPageStats:[],    // [{date, impressions, clicks, engagement}]
-  liPostInsights:[], // [{date, hour, dayOfWeek, title, impressions, clicks, likes, comments}]
+  liPostInsights:[], // [{date, hour, dayOfWeek, title, impressions, clicks}]
   liIndustries:[],   // [{industry, count}]
   liTotalFollowers:0,
 };
@@ -932,7 +952,14 @@ export default function App() {
 
   // ── Live data (ad spend) ──────────────────────────────────────────────────
   const[liveData,setLive]=useState(()=>lsGet("wo_liveData",EMPTY_LIVE));
-  const[socialData,setSocial]=useState(()=>lsGet("wo_social",EMPTY_SOCIAL));
+  const[socialData,setSocial]=useState(()=>{
+    const saved = lsGet("wo_social", null);
+    // Validate saved data — if it's missing key array fields, use fresh EMPTY_SOCIAL
+    if(!saved || !Array.isArray(saved.igReach) || !Array.isArray(saved.liFollowers)) {
+      return EMPTY_SOCIAL;
+    }
+    return saved;
+  });
   useEffect(()=>{ lsSave("wo_social",socialData); },[socialData]);
   const[socFromDate,setSocFromDate]=useState("");
   const[socToDate,setSocToDate]=useState("");
@@ -1576,6 +1603,7 @@ export default function App() {
   const timeStr = now.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
 
   return(
+    <ErrorBoundary>
     <div style={{minHeight:"100vh",width:"100%",background:C.bg,color:C.text,fontFamily:"'Inter','Barlow','Helvetica Neue',sans-serif",display:"flex",flexDirection:"column"}}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=DM+Mono:wght@400;500&display=swap');
@@ -2243,9 +2271,13 @@ export default function App() {
 
         {/* ══ SOCIALS ════════════════════════════════════════════════════════ */}
         {page==="socials"&&(()=>{
-          const { igFollowers, igFollowing, igMediaCount, igUsername, igReach, igPosts=[], igReels=[],
-                  liFollowers, liPageStats, liPostInsights, liIndustries,
-                  liTotalFollowers } = socialData;
+          // Safe destructure — all arrays default to [] so .filter()/.map() never crash
+          const {
+            igFollowers=0, igFollowing=0, igMediaCount=0, igUsername='',
+            igReach=[], igPosts=[], igReels=[],
+            liFollowers=[], liPageStats=[], liPostInsights=[], liIndustries=[],
+            liTotalFollowers=0,
+          } = socialData || {};
 
           const hasSocial = igFollowers>0||liTotalFollowers>0||igReach.length>0||liPageStats.length>0;
 
@@ -3450,5 +3482,6 @@ export default function App() {
         })()}
       </main>
     </div>
+    </ErrorBoundary>
   );
 }
