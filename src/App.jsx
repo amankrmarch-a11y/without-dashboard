@@ -34,31 +34,31 @@ function useLibsReady() {
 // ─── Theme tokens (light & dark) ─────────────────────────────────────────────
 const THEMES = {
   light: {
-    bg:"#ecedf5",       card:"#ffffff",      cardAlt:"#f4f5fb",   border:"#dddee8",
-    primary:"#2d2d4e",  primaryLt:"#3d3d6e", primaryText:"#fff",
-    accent:"#7ab800",   accentLt:"#f0f7d4",  accentMid:"#5a8a00",
-    text:"#1a1a2e",     sub:"#4a4a72",       muted:"#8888aa",
+    // Without® brand: deep void nav, lime-green accent, clean off-white bg
+    bg:"#f2f4f0",       card:"#ffffff",      cardAlt:"#f5f7f3",   border:"#e0e4db",
+    primary:"#1a1a2e",  primaryLt:"#2a2a42", primaryText:"#fff",
+    accent:"#7ab800",   accentLt:"#eef6d0",  accentMid:"#5a8a00",
+    text:"#1a1a2e",     sub:"#3a3a52",       muted:"#7a8a72",
     meta:"#1877f2",     metaLt:"#e8f0fe",
     li:"#0a66c2",       liLt:"#e8f2fb",
     google:"#ea4335",   googleLt:"#fce8e6",
-    navBg:"#ffffff",    navBorder:"#dddee8",
+    navBg:"#1a1a2e",    navBorder:"#2a2a42",  // deep void nav like without.live
     up:"#16a34a",       upBg:"#f0fdf4",
     down:"#dc2626",     downBg:"#fef2f2",
-    // keep sidebar aliases for any leftover refs
-    sidebar:"#2d2d4e",  sidebarTx:"#c8d4c4",
+    sidebar:"#1a1a2e",  sidebarTx:"#b5e550",  // lime green on dark nav
   },
   dark: {
-    bg:"#13132a",       card:"#1c1c3a",      cardAlt:"#22224a",   border:"#2e2e55",
-    primary:"#5c5c9e",  primaryLt:"#7070b8", primaryText:"#fff",
-    accent:"#7ab800",   accentLt:"#1e2d0a",  accentMid:"#5a8a00",
-    text:"#e8e8ff",     sub:"#9898cc",       muted:"#5a5a88",
+    bg:"#0f0f1a",       card:"#1a1a2e",      cardAlt:"#222238",   border:"#2e2e50",
+    primary:"#b5e550",  primaryLt:"#caf270", primaryText:"#1a1a2e",
+    accent:"#b5e550",   accentLt:"#1e2d0a",  accentMid:"#8ab800",
+    text:"#f0f4e8",     sub:"#b0baa0",       muted:"#606878",
     meta:"#4a9eff",     metaLt:"#0d1f3c",
     li:"#3a8fd4",       liLt:"#0d1e30",
     google:"#ff6b5b",   googleLt:"#2a0f0d",
-    navBg:"#1c1c3a",    navBorder:"#2e2e55",
-    up:"#22c55e",       upBg:"#052e16",
+    navBg:"#0f0f1a",    navBorder:"#2e2e50",
+    up:"#b5e550",       upBg:"#1a2e0a",
     down:"#f87171",     downBg:"#2a0a0a",
-    sidebar:"#13132a",  sidebarTx:"#9898cc",
+    sidebar:"#0f0f1a",  sidebarTx:"#b5e550",
   },
 };
 let C = THEMES.light;
@@ -1316,7 +1316,17 @@ export default function App() {
   };
 
   // ── Computed aggregates (ads) ─────────────────────────────────────────────
-  const avail=[...new Set([...liveData.meta,...liveData.linkedin,...liveData.google].map(d=>d.yearMonth||d.month).filter(Boolean))].sort();
+  // Enrich stored records with cpl/ctr if not already computed (handles old localStorage cache)
+  const enrichAds = arr => arr.map(r => ({
+    ...r,
+    cpl: r.cpl || (r.leads>0 ? Math.round(r.spend/r.leads) : 0),
+    ctr: r.ctr || (r.impressions>0 ? parseFloat(((r.clicks/r.impressions)*100).toFixed(2)) : 0),
+    cpc: r.cpc || (r.clicks>0 ? Math.round(r.spend/r.clicks) : 0),
+  }));
+  const enrichedMeta     = enrichAds(liveData.meta);
+  const enrichedLinkedIn = enrichAds(liveData.linkedin);
+  const enrichedGoogle   = enrichAds(liveData.google);
+  const avail=[...new Set([...enrichedMeta,...enrichedLinkedIn,...enrichedGoogle].map(d=>d.yearMonth||d.month).filter(Boolean))].sort();
   const selMonths = useMemo(()=>{
     // Default: last 3 months when no filter set
     const now = new Date();
@@ -1334,9 +1344,9 @@ export default function App() {
   const inSel=m=>selMonths.length===0||selMonths.includes(m);
   const prevMonth=m=>{ if(!m) return null; const [y,mo]=m.split('-').map(Number); const pm=mo===1?12:mo-1; const py=mo===1?y-1:y; return `${py}-${String(pm).padStart(2,'0')}`; };
 
-  const md=liveData.meta.filter(d=>inSel(d.yearMonth||d.month));
-  const ld=liveData.linkedin.filter(d=>inSel(d.yearMonth||d.month));
-  const gd=liveData.google.filter(d=>inSel(d.yearMonth||d.month));
+  const md=enrichedMeta.filter(d=>inSel(d.yearMonth||d.month));
+  const ld=enrichedLinkedIn.filter(d=>inSel(d.yearMonth||d.month));
+  const gd=enrichedGoogle.filter(d=>inSel(d.yearMonth||d.month));
   const agg=arr=>arr.reduce((a,r)=>({spend:a.spend+r.spend,leads:a.leads+r.leads,clicks:a.clicks+r.clicks,impressions:a.impressions+r.impressions,reach:a.reach+(r.reach||0)}),{spend:0,leads:0,clicks:0,impressions:0,reach:0});
   const mAgg=agg(md); const lAgg=agg(ld); const gAgg=agg(gd);
   // Channel-aware totals — respect activeChan filter
@@ -1372,8 +1382,11 @@ export default function App() {
   const pieData=[{name:"Meta",value:mAgg.spend,color:C.meta},{name:"LinkedIn",value:lAgg.spend,color:C.li},{name:"Google",value:gAgg.spend,color:C.google}].filter(p=>p.value>0);
 
   const findM = (arr,ym) => arr.find(d=>(d.yearMonth||d.month)===ym);
-  const cplData=allM.map(m=>({month:ymLabel(m),Meta:findM(md,m)?.cpl||0,LinkedIn:findM(ld,m)?.cpl||0,Google:findM(gd,m)?.cpl||0}));
-  const ctrData=allM.map(m=>({month:ymLabel(m),Meta:findM(md,m)?.ctr||0,LinkedIn:findM(ld,m)?.ctr||0,Google:findM(gd,m)?.ctr||0}));
+  // Compute cpl/ctr on-the-fly — don't rely on stored fields (may be missing from old cache)
+  const getCPL = r => r&&r.leads>0 ? Math.round(r.spend/r.leads) : 0;
+  const getCTR = r => r&&r.impressions>0 ? parseFloat(((r.clicks/r.impressions)*100).toFixed(2)) : 0;
+  const cplData=allM.map(m=>({month:ymLabel(m),Meta:getCPL(findM(md,m)),LinkedIn:getCPL(findM(ld,m)),Google:getCPL(findM(gd,m))}));
+  const ctrData=allM.map(m=>({month:ymLabel(m),Meta:getCTR(findM(md,m)),LinkedIn:getCTR(findM(ld,m)),Google:getCTR(findM(gd,m))}));
   const barData=allM.map(m=>({month:ymLabel(m),Meta:findM(md,m)?.spend||0,LinkedIn:findM(ld,m)?.spend||0,Google:findM(gd,m)?.spend||0}));
   const roasLabel = activeChan==="all"?"Blended ROAS":`${activeChan} ROAS`;
   const allCampaigns = [...(liveData.metaCamp||[]).map(c=>({...c,source:"Meta"})),...(liveData.linkedinCamp||[]).map(c=>({...c,source:"LinkedIn"})),...(liveData.googleCamp||[]).map(c=>({...c,source:"Google"}))].filter(c=>activeChan==="all"||c.source===activeChan).sort((a,b)=>b.spend-a.spend).slice(0,10);
@@ -1389,11 +1402,21 @@ export default function App() {
   const revenueROAS = totalB2BRevenue>0&&tSpend>0 ? parseFloat((totalB2BRevenue/tSpend).toFixed(2)) : 0;
   const hasRevROAS = totalB2BRevenue>0&&tSpend>0;
   const allMonthsUnion=[...new Set([...allM,...invoiceData.map(r=>r.yearMonth).filter(m=>m&&m!=="—")])].filter(m=>inSel(m)).sort();
+  // Channel-aware spend per month — matches tSpend logic
+  const chanSpendForMonth = ym => {
+    const ms = findM(md,ym)||{spend:0};
+    const ls = findM(ld,ym)||{spend:0};
+    const gs = findM(gd,ym)||{spend:0};
+    if(activeChan==="Meta")     return ms.spend;
+    if(activeChan==="LinkedIn") return ls.spend;
+    if(activeChan==="Google")   return gs.spend;
+    return ms.spend+ls.spend+gs.spend; // "all"
+  };
   const monthlyRevSpend=allMonthsUnion.map(ym=>({
     month:ymLabel(ym),
     yearMonth:ym,
-    revenue:invoiceData.filter(r=>r.yearMonth===ym).reduce((s,r)=>s+r.subtotal,0),
-    spend:(findM(md,ym)||{spend:0}).spend+(findM(ld,ym)||{spend:0}).spend+(findM(gd,ym)||{spend:0}).spend,
+    revenue:invoiceData.filter(r=>r.yearMonth===ym&&/^B2B/i.test(r.businessType||r.type||"")).reduce((s,r)=>s+r.subtotal,0),
+    spend:chanSpendForMonth(ym),
     roas:0,
   })).map(r=>({...r,roas:r.revenue>0&&r.spend>0?parseFloat((r.revenue/r.spend).toFixed(2)):0})).filter(r=>r.revenue>0||r.spend>0);
 
@@ -1414,8 +1437,8 @@ export default function App() {
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=DM+Mono:wght@400;500&display=swap');
         *{box-sizing:border-box;margin:0;padding:0;}
         ::-webkit-scrollbar{width:4px;}::-webkit-scrollbar-track{background:transparent;}::-webkit-scrollbar-thumb{background:${C.border};border-radius:4px;}
-        .nb{transition:all .18s;border-radius:8px!important;}.nb:hover{background:${C.cardAlt}!important;}
-        .nb.on{background:${C.primary}!important;color:${C.primaryText}!important;}
+        .nb{transition:all .18s;border-radius:8px!important;color:rgba(255,255,255,0.65)!important;}.nb:hover{background:rgba(255,255,255,0.1)!important;color:#fff!important;}
+        .nb.on{background:#b5e550!important;color:#1a1a2e!important;font-weight:800!important;}
         .fb{transition:all .15s;cursor:pointer;}.fb:hover{border-color:${C.primary}!important;color:${C.primary}!important;}
         .fb.on{background:${C.primary}!important;border-color:${C.primary}!important;color:#fff!important;font-weight:700!important;}
         .cb{transition:all .12s;cursor:pointer;}.cb:hover{border-color:${C.primary}60!important;}
@@ -1435,19 +1458,19 @@ export default function App() {
       `}</style>
 
       {/* ── Top Navigation Bar ─────────────────────────────────────────────── */}
-      <header style={{background:C.navBg,borderBottom:`1px solid ${C.navBorder}`,position:"sticky",top:0,zIndex:100,boxShadow:"0 1px 8px rgba(45,45,78,0.06)"}}>
+      <header style={{background:C.navBg,borderBottom:`1px solid ${C.navBorder}`,position:"sticky",top:0,zIndex:100,boxShadow:"0 2px 12px rgba(26,26,46,0.08)"}}>
         {/* Brand row */}
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 28px 0"}}>
           <div style={{display:"flex",alignItems:"center",gap:10}}>
-            <div style={{width:28,height:28,borderRadius:7,background:C.primary,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:8,color:"#b5e550",letterSpacing:0.5}}>W/O</div>
+            <div style={{width:32,height:32,borderRadius:8,background:"#b5e550",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:9,color:"#1a1a2e",letterSpacing:0.5,flexShrink:0}}>W/O</div>
             <div>
-              <div style={{fontWeight:800,fontSize:15,color:C.text,letterSpacing:-0.3}}>Without Growth Dashboard</div>
+              <div style={{fontWeight:800,fontSize:15,color:"#ffffff",letterSpacing:-0.3}}>Without Growth Dashboard</div>
               <div style={{fontSize:11,color:C.muted}}>Live · {timeStr}</div>
             </div>
           </div>
           <div style={{display:"flex",alignItems:"center",gap:8}}>
             {hasFiles&&<span style={{fontSize:11,color:C.muted,background:C.cardAlt,padding:"3px 10px",borderRadius:20,border:`1px solid ${C.border}`}}>{fileCount} file{fileCount!==1?"s":""} loaded</span>}
-            <button onClick={()=>setDarkMode(d=>!d)} style={{background:C.cardAlt,border:`1px solid ${C.border}`,borderRadius:20,padding:"5px 12px",fontSize:11,fontWeight:600,color:C.sub,cursor:"pointer"}}>{darkMode?"☀️ Light":"🌙 Dark"}</button>
+            <button onClick={()=>setDarkMode(d=>!d)} style={{background:"rgba(255,255,255,0.1)",border:"1px solid rgba(255,255,255,0.2)",borderRadius:20,padding:"5px 12px",fontSize:11,fontWeight:600,color:"rgba(255,255,255,0.8)",cursor:"pointer"}}>{darkMode?"☀️ Light":"🌙 Dark"}</button>
           </div>
         </div>
         {/* Tab nav row */}
@@ -2139,7 +2162,9 @@ export default function App() {
             if(!monthMap[key]) monthMap[key] = { label:`${r.closingMonth} ${r.closingYear}`, won:0, lost:0, lostFA:0, active:0 };
             monthMap[key][r.stageClass==='closedWon'?'won':r.stageClass==='closedLost'?'lost':r.stageClass==='lostFA'?'lostFA':'active']++;
           });
-          const monthArr = Object.keys(monthMap).sort().slice(-12).map(k => monthMap[k]);
+          // Default: last 3 months; if date filter active use all months in range
+          const hasDateFilter = !!(crmAppliedFrom || crmAppliedTo);
+          const monthArr = Object.keys(monthMap).sort().slice(hasDateFilter ? 0 : -3).map(k => monthMap[k]);
 
           const STAGE_COLORS = { Won:'#16a34a', 'Lost (FA)':'#f59e0b', Lost:C.down, Active:'#7c3aed' };
 
@@ -2191,22 +2216,34 @@ export default function App() {
               {/* ── Charts row ────────────────────────────────────────────── */}
               <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(260px,1fr))',gap:12}}>
 
-                {/* Monthly trend */}
+                {/* Monthly trend — horizontal bar, 3 months default */}
                 {monthArr.length>0&&(
-                <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:12,padding:'16px',boxShadow:'0 1px 3px rgba(0,0,0,0.04)'}}>
-                  <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:4}}>Monthly B2B Pipeline</div>
-                  <div style={{fontSize:10,color:C.muted,marginBottom:10}}>by closing date · last 12 months</div>
-                  <ResponsiveContainer width="100%" height={180}>
-                    <BarChart data={monthArr} barSize={7} barGap={2}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#efefef" vertical={false}/>
-                      <XAxis dataKey="label" tick={{fill:C.muted,fontSize:9}} axisLine={false} tickLine={false}/>
-                      <YAxis tick={{fill:C.muted,fontSize:9}} axisLine={false} tickLine={false}/>
-                      <Tooltip contentStyle={{background:'#fff',border:`1px solid ${C.border}`,borderRadius:7,fontSize:11}}/>
-                      <Legend iconType="circle" iconSize={6} wrapperStyle={{fontSize:10,paddingTop:6}}/>
-                      <Bar dataKey="active"  name="Active"       fill="#7c3aed" radius={[3,3,0,0]}/>
-                      <Bar dataKey="won"     name="Won"          fill="#16a34a" radius={[3,3,0,0]}/>
-                      <Bar dataKey="lostFA"  name="Lost (FA)"    fill="#f59e0b" radius={[3,3,0,0]}/>
-                      <Bar dataKey="lost"    name="Closed Lost"  fill={C.down}  radius={[3,3,0,0]}/>
+                <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:14,padding:'18px',boxShadow:'0 2px 8px rgba(26,26,46,0.06)'}}>
+                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
+                    <div>
+                      <div style={{fontSize:11,fontWeight:700,color:C.text}}>Monthly B2B Pipeline</div>
+                      <div style={{fontSize:10,color:C.muted,marginTop:2}}>by closing date · {hasDateFilter?'filtered range':'last 3 months'}</div>
+                    </div>
+                    <div style={{display:'flex',gap:10,flexWrap:'wrap'}}>
+                      {[{k:'won',label:'Won',col:'#16a34a'},{k:'lostFA',label:'Lost FA',col:'#f59e0b'},
+                        {k:'lost',label:'Lost',col:C.down},{k:'active',label:'Active',col:'#7c3aed'}].map(s=>(
+                        <div key={s.k} style={{display:'flex',alignItems:'center',gap:4}}>
+                          <div style={{width:8,height:8,borderRadius:'50%',background:s.col}}/>
+                          <span style={{fontSize:10,color:C.muted}}>{s.label}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <ResponsiveContainer width="100%" height={Math.max(100, monthArr.length * 52)}>
+                    <BarChart data={monthArr} layout="vertical" barSize={10} barGap={2} barCategoryGap="30%">
+                      <CartesianGrid strokeDasharray="3 3" stroke={C.border} horizontal={false}/>
+                      <XAxis type="number" tick={{fill:C.muted,fontSize:9}} axisLine={false} tickLine={false}/>
+                      <YAxis type="category" dataKey="label" width={72} tick={{fill:C.text,fontSize:11,fontWeight:600}} axisLine={false} tickLine={false}/>
+                      <Tooltip contentStyle={{background:C.card,border:`1px solid ${C.border}`,borderRadius:8,fontSize:11,boxShadow:'0 4px 16px rgba(0,0,0,0.1)'}}/>
+                      <Bar dataKey="active"  name="Active"      fill="#7c3aed" radius={[0,4,4,0]}/>
+                      <Bar dataKey="won"     name="Won"         fill="#16a34a" radius={[0,4,4,0]}/>
+                      <Bar dataKey="lostFA"  name="Lost FA"     fill="#f59e0b" radius={[0,4,4,0]}/>
+                      <Bar dataKey="lost"    name="Closed Lost" fill={C.down}  radius={[0,4,4,0]}/>
                     </BarChart>
                   </ResponsiveContainer>
                 </div>)}
