@@ -1,4 +1,3 @@
-// CSV → JSON parser
 function csvToJson(csv) {
   const lines = csv.split('\n').filter(l => l.trim());
   if (lines.length < 2) return [];
@@ -36,7 +35,7 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') { res.status(200).end(); return; }
 
   try {
-    // ── ONE token refresh per request ────────────────────────────────────────
+    // ONE token refresh per request
     const tokenRes = await fetch('https://accounts.zoho.in/oauth/v2/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -56,40 +55,35 @@ export default async function handler(req, res) {
 
     const WS  = '172632000001964001';
     const ORG = process.env.ZOHO_ANALYTICS_ORG_ID || '';
+
     const VIEWS = {
-      crm:      '172632000001964013',
-      meta:     '172632000001964071',
-      linkedin: '172632000001964086',
-      google:   '172632000001964061',
-      invoices: '172632000001967250',
+      // ── Ads ──────────────────────────────────────────────
+      crm:           '172632000001964013',
+      meta:          '172632000001964071',
+      linkedin:      '172632000001964086',
+      google:        '172632000001964061',
+      invoices:      '172632000001967250',
+      // ── Instagram ────────────────────────────────────────
+      ig_info:       '172632000001964020',  // Profile Information
+      ig_insights:   '172632000001964028',  // Profile Insights (daily reach)
+      ig_media:      '172632000001964026',  // Media Insights (per-post: timestamp + engagement)
+      ig_reels:      '172632000001964029',  // Reels Insights
+      // ── LinkedIn Pages ───────────────────────────────────
+      li_page_info:    '172632000001964030', // Pages Informations
+      li_page_stats:   '172632000001964037', // Page Statistics By Date
+      li_followers:    '172632000001964034', // Follower Counts By Date
+      li_industries:   '172632000001964033', // Follower Counts By Industries
+      li_posts:        '172632000001964038', // Post Insights
+      li_shares:       '172632000001964031', // Share Statistics By Date
     };
 
-    // ── ALL sources in one call — only ONE token refresh needed ──────────────
-    if (source === 'all') {
-      const [crm, invoices, meta, linkedin, google] = await Promise.all([
-        fetchView(token, WS, VIEWS.crm,      ORG),
-        fetchView(token, WS, VIEWS.invoices,  ORG),
-        fetchView(token, WS, VIEWS.meta,      ORG),
-        fetchView(token, WS, VIEWS.linkedin,  ORG),
-        fetchView(token, WS, VIEWS.google,    ORG),
-      ]);
-      return res.json({
-        success: true,
-        source: 'all',
-        crm:      { success: true, format: 'csv', count: Array.isArray(crm)      ? crm.length      : 0, data: crm },
-        invoices: { success: true, format: 'csv', count: Array.isArray(invoices) ? invoices.length : 0, data: invoices },
-        meta:     { success: true, format: 'csv', count: Array.isArray(meta)     ? meta.length     : 0, data: meta },
-        linkedin: { success: true, format: 'csv', count: Array.isArray(linkedin) ? linkedin.length : 0, data: linkedin },
-        google:   { success: true, format: 'csv', count: Array.isArray(google)   ? google.length   : 0, data: google },
-      });
-    }
-
-    // ── Single source (kept for debugging) ───────────────────────────────────
-    if (VIEWS[source]) {
+    // ── Single source (for debugging) ────────────────────────────────────────
+    if (source && VIEWS[source]) {
       const data = await fetchView(token, WS, VIEWS[source], ORG);
-      return res.json({ success: true, source, format: 'csv', count: Array.isArray(data) ? data.length : 0, data });
+      return res.json({ success: true, source, count: Array.isArray(data) ? data.length : 0, data });
     }
 
+    // ── List views ────────────────────────────────────────────────────────────
     if (source === 'list_views') {
       const r = await fetch(
         `https://analyticsapi.zoho.in/restapi/v2/workspaces/${WS}/views`,
@@ -99,7 +93,57 @@ export default async function handler(req, res) {
       return res.json({ success: true, views: d.data?.views?.map(v => ({ id: v.viewId, name: v.viewName })) || d });
     }
 
-    return res.json({ success: true, message: 'v10 Zoho API ready', workspace: WS });
+    // ── ALL sources — ONE token refresh, all fetched in parallel ─────────────
+    if (!source || source === 'all') {
+      const [
+        crm, invoices, meta, linkedin, google,
+        ig_info, ig_insights, ig_media, ig_reels,
+        li_page_info, li_page_stats, li_followers, li_industries, li_posts, li_shares
+      ] = await Promise.all([
+        fetchView(token, WS, VIEWS.crm,          ORG),
+        fetchView(token, WS, VIEWS.invoices,      ORG),
+        fetchView(token, WS, VIEWS.meta,          ORG),
+        fetchView(token, WS, VIEWS.linkedin,      ORG),
+        fetchView(token, WS, VIEWS.google,        ORG),
+        fetchView(token, WS, VIEWS.ig_info,       ORG),
+        fetchView(token, WS, VIEWS.ig_insights,   ORG),
+        fetchView(token, WS, VIEWS.ig_media,      ORG),
+        fetchView(token, WS, VIEWS.ig_reels,      ORG),
+        fetchView(token, WS, VIEWS.li_page_info,  ORG),
+        fetchView(token, WS, VIEWS.li_page_stats, ORG),
+        fetchView(token, WS, VIEWS.li_followers,  ORG),
+        fetchView(token, WS, VIEWS.li_industries, ORG),
+        fetchView(token, WS, VIEWS.li_posts,      ORG),
+        fetchView(token, WS, VIEWS.li_shares,     ORG),
+      ]);
+
+      const wrap = (data, src) => ({
+        success: true, source: src,
+        count: Array.isArray(data) ? data.length : 0,
+        data: Array.isArray(data) ? data : []
+      });
+
+      return res.json({
+        success: true, source: 'all',
+        crm:          wrap(crm,          'crm'),
+        invoices:     wrap(invoices,     'invoices'),
+        meta:         wrap(meta,         'meta'),
+        linkedin:     wrap(linkedin,     'linkedin'),
+        google:       wrap(google,       'google'),
+        ig_info:      wrap(ig_info,      'ig_info'),
+        ig_insights:  wrap(ig_insights,  'ig_insights'),
+        ig_media:     wrap(ig_media,     'ig_media'),
+        ig_reels:     wrap(ig_reels,     'ig_reels'),
+        li_page_info: wrap(li_page_info, 'li_page_info'),
+        li_page_stats:wrap(li_page_stats,'li_page_stats'),
+        li_followers: wrap(li_followers, 'li_followers'),
+        li_industries:wrap(li_industries,'li_industries'),
+        li_posts:     wrap(li_posts,     'li_posts'),
+        li_shares:    wrap(li_shares,    'li_shares'),
+      });
+    }
+
+    return res.json({ success: true, message: 'v11 Zoho API ready' });
 
   } catch (err) {
     return res.status(500).json({ error: err.message });

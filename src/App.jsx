@@ -703,11 +703,13 @@ function exportToPDF(params) {
 const EMPTY_LIVE = {meta:[],linkedin:[],google:[],metaCamp:[],liCamp:[],googleCamp:[]};
 const EMPTY_SOCIAL = {
   igFollowers:0, igFollowing:0, igMedia:0, igUsername:'',
-  igReach:[],           // [{date, reach}] daily
-  liFollowers:[],       // [{date, followers}] by date
-  liPageStats:[],       // [{date, impressions, clicks, engagement}]
-  liPostInsights:[],    // [{date, title, impressions, clicks, engagement}]
-  liIndustries:[],      // [{industry, count}]
+  igReach:[],        // [{date, reach}] daily
+  igMedia2:[],       // [{timestamp, hour, dayOfWeek, impressions, likes, comments, saves}]
+  igReels:[],        // [{timestamp, plays, reach, likes}]
+  liFollowers:[],    // [{date, followers}]
+  liPageStats:[],    // [{date, impressions, clicks, engagement}]
+  liPostInsights:[], // [{date, hour, dayOfWeek, title, impressions, clicks, likes, comments}]
+  liIndustries:[],   // [{industry, count}]
   liTotalFollowers:0,
 };
 const EMPTY_INV = []; // flat array of deduplicated B2B invoices
@@ -1184,24 +1186,63 @@ export default function App() {
       // ── Parse Instagram (from Zoho Analytics) ────────────────────────────
       // Instagram view IDs — update these with real IDs from list_views
       // For now, parse from the data if available in json
-      if(json.ig_insights?.data?.length) {
-        const rows = json.ig_insights.data;
-        const reach = rows.map(r => ({
-          date: r['End Time']||r['end_time']||r['Date']||'',
-          reach: parseFloat(String(r['Reach']||r['reach']||0).replace(/,/g,''))||0,
-        })).filter(r=>r.date&&r.reach>0).sort((a,b)=>a.date.localeCompare(b.date));
-        setSocial(prev=>({...prev, igReach:reach}));
-        results.push(`✅ IG Reach: ${reach.length} days`);
-      }
+      // ── Instagram Profile Info ────────────────────────────────────────────────
       if(json.ig_info?.data?.length) {
         const r = json.ig_info.data[0];
         setSocial(prev=>({...prev,
           igFollowers:parseFloat(String(r['Followers']||0).replace(/,/g,''))||0,
           igFollowing:parseFloat(String(r['Follows']||r['Following']||0).replace(/,/g,''))||0,
-          igMedia:parseFloat(String(r['Media']||0).replace(/,/g,''))||0,
-          igUsername:r['Username']||'',
+          igMediaCount:parseFloat(String(r['Media']||0).replace(/,/g,''))||0,
+          igUsername:r['Username']||'shop.without',
         }));
-        results.push(`✅ IG Profile synced`);
+        results.push(`✅ IG Profile: ${r['Followers']||0} followers`);
+      }
+      // ── Instagram Daily Reach ─────────────────────────────────────────────
+      if(json.ig_insights?.data?.length) {
+        const rows = json.ig_insights.data;
+        const reach = rows.map(r => ({
+          date: (r['End Time']||r['end_time']||r['Date']||'').toString().slice(0,10),
+          reach: parseFloat(String(r['Reach']||r['reach']||0).replace(/,/g,''))||0,
+        })).filter(r=>r.date&&r.reach>0).sort((a,b)=>a.date.localeCompare(b.date));
+        setSocial(prev=>({...prev, igReach:reach}));
+        results.push(`✅ IG Reach: ${reach.length} days`);
+      }
+      // ── Instagram Media Insights (per-post: for best-time analysis) ──────────
+      if(json.ig_media?.data?.length) {
+        const rows = json.ig_media.data;
+        const media = rows.map(r => {
+          const ts = r['Timestamp']||r['Created Time']||r['Post Time']||r['Date']||'';
+          const d = new Date(ts);
+          return {
+            timestamp: ts,
+            hour: isNaN(d)?-1:d.getHours(),
+            dayOfWeek: isNaN(d)?-1:d.getDay(), // 0=Sun, 6=Sat
+            impressions: parseFloat(String(r['Impressions']||0).replace(/,/g,''))||0,
+            reach:       parseFloat(String(r['Reach']||0).replace(/,/g,''))||0,
+            likes:       parseFloat(String(r['Likes']||r['Like Count']||0).replace(/,/g,''))||0,
+            comments:    parseFloat(String(r['Comments']||r['Comment Count']||0).replace(/,/g,''))||0,
+            saves:       parseFloat(String(r['Saved']||r['Saves']||0).replace(/,/g,''))||0,
+            engagement:  parseFloat(String(r['Engagement']||r['Total Engagement']||0).replace(/,/g,''))||0,
+            mediaType:   r['Media Type']||r['Type']||'',
+            caption:     (r['Caption']||r['Description']||'').slice(0,100),
+          };
+        }).filter(r=>r.impressions>0||r.likes>0);
+        setSocial(prev=>({...prev, igPosts:media}));
+        results.push(`✅ IG Posts: ${media.length}`);
+      }
+      // ── Instagram Reels ───────────────────────────────────────────────────
+      if(json.ig_reels?.data?.length) {
+        const rows = json.ig_reels.data;
+        const reels = rows.map(r => ({
+          timestamp: r['Timestamp']||r['Date']||'',
+          plays:     parseFloat(String(r['Plays']||r['Video Views']||0).replace(/,/g,''))||0,
+          reach:     parseFloat(String(r['Reach']||0).replace(/,/g,''))||0,
+          likes:     parseFloat(String(r['Likes']||0).replace(/,/g,''))||0,
+          comments:  parseFloat(String(r['Comments']||0).replace(/,/g,''))||0,
+          shares:    parseFloat(String(r['Shares']||0).replace(/,/g,''))||0,
+        })).filter(r=>r.plays>0||r.reach>0);
+        setSocial(prev=>({...prev, igReels:reels||[]}));
+        results.push(`✅ IG Reels: ${reels.length}`);
       }
 
       // ── Parse LinkedIn Pages (Page Stats + Followers) ──────────────────────
@@ -1232,15 +1273,22 @@ export default function App() {
       }
       if(json.li_posts?.data?.length) {
         const rows = json.li_posts.data;
-        const posts = rows.map(r=>({
-          date: r['Date']||r['Created At']||r['Published At']||'',
-          title: r['Post Text']||r['Title']||r['Content']||'Post',
-          impressions: parseFloat(String(r['Impressions']||0).replace(/,/g,''))||0,
-          clicks: parseFloat(String(r['Clicks']||0).replace(/,/g,''))||0,
-          engagement: parseFloat(String(r['Engagement Rate']||r['Engagement']||0).replace(/,/g,''))||0,
-          likes: parseFloat(String(r['Likes']||0).replace(/,/g,''))||0,
-          comments: parseFloat(String(r['Comments']||0).replace(/,/g,''))||0,
-        })).filter(r=>r.date||r.impressions>0).sort((a,b)=>(b.impressions||0)-(a.impressions||0));
+        const posts = rows.map(r=>{
+          const ts = r['Date']||r['Created At']||r['Published At']||r['Publish Date']||'';
+          const d = new Date(ts);
+          return {
+            date: ts,
+            hour: isNaN(d.getTime())?-1:d.getHours(),
+            dayOfWeek: isNaN(d.getTime())?-1:d.getDay(),
+            title: (r['Post Text']||r['Title']||r['Content']||'Post').slice(0,120),
+            impressions: parseFloat(String(r['Impressions']||0).replace(/,/g,''))||0,
+            clicks:      parseFloat(String(r['Clicks']||0).replace(/,/g,''))||0,
+            engagement:  parseFloat(String(r['Engagement Rate']||r['Engagement']||0).replace(/,/g,''))||0,
+            likes:       parseFloat(String(r['Likes']||r['Reactions']||0).replace(/,/g,''))||0,
+            comments:    parseFloat(String(r['Comments']||0).replace(/,/g,''))||0,
+            shares:      parseFloat(String(r['Shares']||r['Reposts']||0).replace(/,/g,''))||0,
+          };
+        }).filter(r=>r.impressions>0||r.likes>0).sort((a,b)=>(b.impressions||0)-(a.impressions||0));
         setSocial(prev=>({...prev, liPostInsights:posts}));
         results.push(`✅ LI Posts: ${posts.length}`);
       }
@@ -2187,7 +2235,7 @@ export default function App() {
 
         {/* ══ SOCIALS ════════════════════════════════════════════════════════ */}
         {page==="socials"&&(()=>{
-          const { igFollowers, igFollowing, igMedia, igUsername, igReach,
+          const { igFollowers, igFollowing, igMediaCount, igUsername, igReach, igPosts=[], igReels=[],
                   liFollowers, liPageStats, liPostInsights, liIndustries,
                   liTotalFollowers } = socialData;
 
@@ -2264,7 +2312,7 @@ export default function App() {
               {[
                 {label:"Instagram Followers", val:igFollowers>0?fmtNum(igFollowers):"—",    icon:"📸", col:"#e1306c", sub:igUsername?`@${igUsername}`:undefined},
                 {label:"IG Reach (period)",   val:igTotalReach>0?fmtNum(igTotalReach):"—",  icon:"👁",  col:"#f77737", sub:igAvgReach>0?`avg ${fmtNum(igAvgReach)}/day`:undefined},
-                {label:"IG Posts",            val:igMedia>0?String(igMedia):"—",            icon:"🖼",  col:"#833ab4", sub:igFollowing>0?`${fmtNum(igFollowing)} following`:undefined},
+                {label:"IG Posts",            val:igMediaCount>0?String(igMediaCount):"—",            icon:"🖼",  col:"#833ab4", sub:igFollowing>0?`${fmtNum(igFollowing)} following`:undefined},
                 {label:"LinkedIn Followers",  val:liLatest>0?fmtNum(liLatest):"—",          icon:"💼",  col:"#0a66c2", sub:liGrowth!==0?`${liGrowth>=0?"+":""}${liGrowth}% in period`:undefined},
                 {label:"LI Impressions",      val:liTotalImpr>0?fmtNum(liTotalImpr):"—",    icon:"📊",  col:"#0a66c2", sub:liCTR>0?`${liCTR}% CTR`:undefined},
                 {label:"LI Clicks",           val:liTotalClicks>0?fmtNum(liTotalClicks):"—",icon:"🖱",  col:"#0a66c2"},
@@ -2433,6 +2481,155 @@ export default function App() {
               </div>
             </div>
             )}
+
+
+            {/* ── AI: Best Time to Post ───────────────────────────────────── */}
+            {(igPosts.length>0||liPostInsights.filter(p=>p.hour>=0).length>0)&&(()=>{
+              const DAYS = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+              const HOURS = Array.from({length:24},(_,i)=>i);
+
+              // ── Build heatmap data from posts ────────────────────────────
+              const igPostsWithTime = igPosts.filter(p=>p.hour>=0);
+              const liPostsWithTime = liPostInsights.filter(p=>p.hour>=0);
+
+              // Aggregate by hour: avg engagement score
+              const igByHour = {};
+              igPostsWithTime.forEach(p=>{
+                if(!igByHour[p.hour]) igByHour[p.hour]={total:0,count:0};
+                igByHour[p.hour].total += (p.likes||0)+(p.comments||0)*2+(p.saves||0)*3+(p.impressions||0)*0.01;
+                igByHour[p.hour].count++;
+              });
+              const liByHour = {};
+              liPostsWithTime.forEach(p=>{
+                if(!liByHour[p.hour]) liByHour[p.hour]={total:0,count:0};
+                liByHour[p.hour].total += (p.likes||0)+(p.comments||0)*2+(p.clicks||0)*1.5+(p.impressions||0)*0.01;
+                liByHour[p.hour].count++;
+              });
+
+              // Find top 3 hours for each platform
+              const scoreByHour = (byHour) => Object.entries(byHour)
+                .map(([h,v])=>({hour:parseInt(h), score:v.count>0?v.total/v.count:0, posts:v.count}))
+                .sort((a,b)=>b.score-a.score);
+
+              const igTopHours = scoreByHour(igByHour).slice(0,3);
+              const liTopHours = scoreByHour(liByHour).slice(0,3);
+
+              // Day of week analysis
+              const igByDay = {}; const liByDay = {};
+              igPostsWithTime.forEach(p=>{
+                if(!igByDay[p.dayOfWeek]) igByDay[p.dayOfWeek]={total:0,count:0};
+                igByDay[p.dayOfWeek].total += (p.likes||0)+(p.comments||0)*2+(p.saves||0)*3;
+                igByDay[p.dayOfWeek].count++;
+              });
+              liPostsWithTime.forEach(p=>{
+                if(!liByDay[p.dayOfWeek]) liByDay[p.dayOfWeek]={total:0,count:0};
+                liByDay[p.dayOfWeek].total += (p.likes||0)+(p.comments||0)*2+(p.clicks||0);
+                liByDay[p.dayOfWeek].count++;
+              });
+              const igBestDay = Object.entries(igByDay).sort((a,b)=>(b[1].count>0?b[1].total/b[1].count:0)-(a[1].count>0?a[1].total/a[1].count:0))[0];
+              const liBestDay = Object.entries(liByDay).sort((a,b)=>(b[1].count>0?b[1].total/b[1].count:0)-(a[1].count>0?a[1].total/a[1].count:0))[0];
+
+              const fmtHour = h => h===0?"12am":h<12?`${h}am`:h===12?"12pm":`${h-12}pm`;
+
+              // Hourly bar data for charts
+              const igHourData = HOURS.map(h=>({
+                hour:fmtHour(h), score:igByHour[h]?Math.round(igByHour[h].total/igByHour[h].count):0, posts:igByHour[h]?.count||0
+              }));
+              const liHourData = HOURS.map(h=>({
+                hour:fmtHour(h), score:liByHour[h]?Math.round(liByHour[h].total/liByHour[h].count):0, posts:liByHour[h]?.count||0
+              }));
+
+              return(
+              <div>
+                <SectionHead title="Best Time to Post" sub="based on your historical engagement data"/>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(300px,1fr))",gap:12}}>
+
+                  {/* Instagram best times */}
+                  {igPostsWithTime.length>0&&(
+                  <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:14,padding:"18px",boxShadow:"0 2px 8px rgba(26,26,46,0.06)"}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+                      <span style={{fontSize:16}}>📸</span>
+                      <div style={{fontSize:11,fontWeight:700,color:C.text}}>Instagram — Best Hours</div>
+                    </div>
+                    <div style={{fontSize:10,color:C.muted,marginBottom:14}}>based on {igPostsWithTime.length} posts · engagement score</div>
+
+                    {/* Top 3 slots */}
+                    <div style={{display:"flex",gap:8,marginBottom:16}}>
+                      {igTopHours.map((h,i)=>(
+                        <div key={h.hour} style={{flex:1,background:i===0?"#e1306c":i===1?"#f77737":"#833ab4",borderRadius:10,padding:"10px",textAlign:"center"}}>
+                          <div style={{fontSize:9,color:"rgba(255,255,255,0.7)",fontWeight:700,textTransform:"uppercase",marginBottom:4}}>{i===0?"🥇 Best":i===1?"🥈 2nd":"🥉 3rd"}</div>
+                          <div style={{fontSize:18,fontWeight:800,color:"#fff",fontFamily:"'DM Mono',monospace"}}>{fmtHour(h.hour)}</div>
+                          <div style={{fontSize:9,color:"rgba(255,255,255,0.65)",marginTop:3}}>{h.posts} post{h.posts!==1?"s":""}</div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Hourly engagement chart */}
+                    <ResponsiveContainer width="100%" height={120}>
+                      <BarChart data={igHourData} barSize={8}>
+                        <XAxis dataKey="hour" tick={{fill:C.muted,fontSize:7}} axisLine={false} tickLine={false} interval={3}/>
+                        <YAxis hide/>
+                        <Tooltip formatter={(v,n,p)=>[`Score: ${v}`,`${p.payload.posts} posts`]} contentStyle={{background:C.card,border:`1px solid ${C.border}`,borderRadius:7,fontSize:10}}/>
+                        <Bar dataKey="score" radius={[3,3,0,0]}>
+                          {igHourData.map((entry,index)=>(
+                            <Cell key={index} fill={entry.score>0&&igTopHours[0]&&entry.score>=igTopHours[0].score*0.8?"#e1306c":"#e1306c44"}/>
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+
+                    {igBestDay&&(
+                      <div style={{marginTop:12,padding:"8px 12px",background:"#e1306c11",borderRadius:8,fontSize:11,color:"#e1306c",fontWeight:600}}>
+                        📅 Best day: <b>{DAYS[parseInt(igBestDay[0])]}</b> — highest avg engagement
+                      </div>
+                    )}
+                  </div>
+                  )}
+
+                  {/* LinkedIn best times */}
+                  {liPostsWithTime.length>0&&(
+                  <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:14,padding:"18px",boxShadow:"0 2px 8px rgba(26,26,46,0.06)"}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+                      <span style={{fontSize:16}}>💼</span>
+                      <div style={{fontSize:11,fontWeight:700,color:C.text}}>LinkedIn — Best Hours</div>
+                    </div>
+                    <div style={{fontSize:10,color:C.muted,marginBottom:14}}>based on {liPostsWithTime.length} posts · engagement score</div>
+
+                    <div style={{display:"flex",gap:8,marginBottom:16}}>
+                      {liTopHours.map((h,i)=>(
+                        <div key={h.hour} style={{flex:1,background:i===0?"#0a66c2":i===1?"#0a55a0":"#084d8c",borderRadius:10,padding:"10px",textAlign:"center"}}>
+                          <div style={{fontSize:9,color:"rgba(255,255,255,0.7)",fontWeight:700,textTransform:"uppercase",marginBottom:4}}>{i===0?"🥇 Best":i===1?"🥈 2nd":"🥉 3rd"}</div>
+                          <div style={{fontSize:18,fontWeight:800,color:"#fff",fontFamily:"'DM Mono',monospace"}}>{fmtHour(h.hour)}</div>
+                          <div style={{fontSize:9,color:"rgba(255,255,255,0.65)",marginTop:3}}>{h.posts} post{h.posts!==1?"s":""}</div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <ResponsiveContainer width="100%" height={120}>
+                      <BarChart data={liHourData} barSize={8}>
+                        <XAxis dataKey="hour" tick={{fill:C.muted,fontSize:7}} axisLine={false} tickLine={false} interval={3}/>
+                        <YAxis hide/>
+                        <Tooltip formatter={(v,n,p)=>[`Score: ${v}`,`${p.payload.posts} posts`]} contentStyle={{background:C.card,border:`1px solid ${C.border}`,borderRadius:7,fontSize:10}}/>
+                        <Bar dataKey="score" radius={[3,3,0,0]}>
+                          {liHourData.map((entry,index)=>(
+                            <Cell key={index} fill={entry.score>0&&liTopHours[0]&&entry.score>=liTopHours[0].score*0.8?"#0a66c2":"#0a66c244"}/>
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+
+                    {liBestDay&&(
+                      <div style={{marginTop:12,padding:"8px 12px",background:"#0a66c211",borderRadius:8,fontSize:11,color:"#0a66c2",fontWeight:600}}>
+                        📅 Best day: <b>{DAYS[parseInt(liBestDay[0])]}</b> — highest avg engagement
+                      </div>
+                    )}
+                  </div>
+                  )}
+
+                </div>
+              </div>
+              );
+            })()}
 
             </>)}
           </div>
@@ -2851,6 +3048,155 @@ export default function App() {
                 </div>
                 );
               })()}
+
+
+            {/* ── AI: Best Time to Post ───────────────────────────────────── */}
+            {(igPosts.length>0||liPostInsights.filter(p=>p.hour>=0).length>0)&&(()=>{
+              const DAYS = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+              const HOURS = Array.from({length:24},(_,i)=>i);
+
+              // ── Build heatmap data from posts ────────────────────────────
+              const igPostsWithTime = igPosts.filter(p=>p.hour>=0);
+              const liPostsWithTime = liPostInsights.filter(p=>p.hour>=0);
+
+              // Aggregate by hour: avg engagement score
+              const igByHour = {};
+              igPostsWithTime.forEach(p=>{
+                if(!igByHour[p.hour]) igByHour[p.hour]={total:0,count:0};
+                igByHour[p.hour].total += (p.likes||0)+(p.comments||0)*2+(p.saves||0)*3+(p.impressions||0)*0.01;
+                igByHour[p.hour].count++;
+              });
+              const liByHour = {};
+              liPostsWithTime.forEach(p=>{
+                if(!liByHour[p.hour]) liByHour[p.hour]={total:0,count:0};
+                liByHour[p.hour].total += (p.likes||0)+(p.comments||0)*2+(p.clicks||0)*1.5+(p.impressions||0)*0.01;
+                liByHour[p.hour].count++;
+              });
+
+              // Find top 3 hours for each platform
+              const scoreByHour = (byHour) => Object.entries(byHour)
+                .map(([h,v])=>({hour:parseInt(h), score:v.count>0?v.total/v.count:0, posts:v.count}))
+                .sort((a,b)=>b.score-a.score);
+
+              const igTopHours = scoreByHour(igByHour).slice(0,3);
+              const liTopHours = scoreByHour(liByHour).slice(0,3);
+
+              // Day of week analysis
+              const igByDay = {}; const liByDay = {};
+              igPostsWithTime.forEach(p=>{
+                if(!igByDay[p.dayOfWeek]) igByDay[p.dayOfWeek]={total:0,count:0};
+                igByDay[p.dayOfWeek].total += (p.likes||0)+(p.comments||0)*2+(p.saves||0)*3;
+                igByDay[p.dayOfWeek].count++;
+              });
+              liPostsWithTime.forEach(p=>{
+                if(!liByDay[p.dayOfWeek]) liByDay[p.dayOfWeek]={total:0,count:0};
+                liByDay[p.dayOfWeek].total += (p.likes||0)+(p.comments||0)*2+(p.clicks||0);
+                liByDay[p.dayOfWeek].count++;
+              });
+              const igBestDay = Object.entries(igByDay).sort((a,b)=>(b[1].count>0?b[1].total/b[1].count:0)-(a[1].count>0?a[1].total/a[1].count:0))[0];
+              const liBestDay = Object.entries(liByDay).sort((a,b)=>(b[1].count>0?b[1].total/b[1].count:0)-(a[1].count>0?a[1].total/a[1].count:0))[0];
+
+              const fmtHour = h => h===0?"12am":h<12?`${h}am`:h===12?"12pm":`${h-12}pm`;
+
+              // Hourly bar data for charts
+              const igHourData = HOURS.map(h=>({
+                hour:fmtHour(h), score:igByHour[h]?Math.round(igByHour[h].total/igByHour[h].count):0, posts:igByHour[h]?.count||0
+              }));
+              const liHourData = HOURS.map(h=>({
+                hour:fmtHour(h), score:liByHour[h]?Math.round(liByHour[h].total/liByHour[h].count):0, posts:liByHour[h]?.count||0
+              }));
+
+              return(
+              <div>
+                <SectionHead title="Best Time to Post" sub="based on your historical engagement data"/>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(300px,1fr))",gap:12}}>
+
+                  {/* Instagram best times */}
+                  {igPostsWithTime.length>0&&(
+                  <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:14,padding:"18px",boxShadow:"0 2px 8px rgba(26,26,46,0.06)"}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+                      <span style={{fontSize:16}}>📸</span>
+                      <div style={{fontSize:11,fontWeight:700,color:C.text}}>Instagram — Best Hours</div>
+                    </div>
+                    <div style={{fontSize:10,color:C.muted,marginBottom:14}}>based on {igPostsWithTime.length} posts · engagement score</div>
+
+                    {/* Top 3 slots */}
+                    <div style={{display:"flex",gap:8,marginBottom:16}}>
+                      {igTopHours.map((h,i)=>(
+                        <div key={h.hour} style={{flex:1,background:i===0?"#e1306c":i===1?"#f77737":"#833ab4",borderRadius:10,padding:"10px",textAlign:"center"}}>
+                          <div style={{fontSize:9,color:"rgba(255,255,255,0.7)",fontWeight:700,textTransform:"uppercase",marginBottom:4}}>{i===0?"🥇 Best":i===1?"🥈 2nd":"🥉 3rd"}</div>
+                          <div style={{fontSize:18,fontWeight:800,color:"#fff",fontFamily:"'DM Mono',monospace"}}>{fmtHour(h.hour)}</div>
+                          <div style={{fontSize:9,color:"rgba(255,255,255,0.65)",marginTop:3}}>{h.posts} post{h.posts!==1?"s":""}</div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Hourly engagement chart */}
+                    <ResponsiveContainer width="100%" height={120}>
+                      <BarChart data={igHourData} barSize={8}>
+                        <XAxis dataKey="hour" tick={{fill:C.muted,fontSize:7}} axisLine={false} tickLine={false} interval={3}/>
+                        <YAxis hide/>
+                        <Tooltip formatter={(v,n,p)=>[`Score: ${v}`,`${p.payload.posts} posts`]} contentStyle={{background:C.card,border:`1px solid ${C.border}`,borderRadius:7,fontSize:10}}/>
+                        <Bar dataKey="score" radius={[3,3,0,0]}>
+                          {igHourData.map((entry,index)=>(
+                            <Cell key={index} fill={entry.score>0&&igTopHours[0]&&entry.score>=igTopHours[0].score*0.8?"#e1306c":"#e1306c44"}/>
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+
+                    {igBestDay&&(
+                      <div style={{marginTop:12,padding:"8px 12px",background:"#e1306c11",borderRadius:8,fontSize:11,color:"#e1306c",fontWeight:600}}>
+                        📅 Best day: <b>{DAYS[parseInt(igBestDay[0])]}</b> — highest avg engagement
+                      </div>
+                    )}
+                  </div>
+                  )}
+
+                  {/* LinkedIn best times */}
+                  {liPostsWithTime.length>0&&(
+                  <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:14,padding:"18px",boxShadow:"0 2px 8px rgba(26,26,46,0.06)"}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+                      <span style={{fontSize:16}}>💼</span>
+                      <div style={{fontSize:11,fontWeight:700,color:C.text}}>LinkedIn — Best Hours</div>
+                    </div>
+                    <div style={{fontSize:10,color:C.muted,marginBottom:14}}>based on {liPostsWithTime.length} posts · engagement score</div>
+
+                    <div style={{display:"flex",gap:8,marginBottom:16}}>
+                      {liTopHours.map((h,i)=>(
+                        <div key={h.hour} style={{flex:1,background:i===0?"#0a66c2":i===1?"#0a55a0":"#084d8c",borderRadius:10,padding:"10px",textAlign:"center"}}>
+                          <div style={{fontSize:9,color:"rgba(255,255,255,0.7)",fontWeight:700,textTransform:"uppercase",marginBottom:4}}>{i===0?"🥇 Best":i===1?"🥈 2nd":"🥉 3rd"}</div>
+                          <div style={{fontSize:18,fontWeight:800,color:"#fff",fontFamily:"'DM Mono',monospace"}}>{fmtHour(h.hour)}</div>
+                          <div style={{fontSize:9,color:"rgba(255,255,255,0.65)",marginTop:3}}>{h.posts} post{h.posts!==1?"s":""}</div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <ResponsiveContainer width="100%" height={120}>
+                      <BarChart data={liHourData} barSize={8}>
+                        <XAxis dataKey="hour" tick={{fill:C.muted,fontSize:7}} axisLine={false} tickLine={false} interval={3}/>
+                        <YAxis hide/>
+                        <Tooltip formatter={(v,n,p)=>[`Score: ${v}`,`${p.payload.posts} posts`]} contentStyle={{background:C.card,border:`1px solid ${C.border}`,borderRadius:7,fontSize:10}}/>
+                        <Bar dataKey="score" radius={[3,3,0,0]}>
+                          {liHourData.map((entry,index)=>(
+                            <Cell key={index} fill={entry.score>0&&liTopHours[0]&&entry.score>=liTopHours[0].score*0.8?"#0a66c2":"#0a66c244"}/>
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+
+                    {liBestDay&&(
+                      <div style={{marginTop:12,padding:"8px 12px",background:"#0a66c211",borderRadius:8,fontSize:11,color:"#0a66c2",fontWeight:600}}>
+                        📅 Best day: <b>{DAYS[parseInt(liBestDay[0])]}</b> — highest avg engagement
+                      </div>
+                    )}
+                  </div>
+                  )}
+
+                </div>
+              </div>
+              );
+            })()}
 
             </>)}
           </div>
