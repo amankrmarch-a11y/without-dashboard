@@ -1311,12 +1311,15 @@ export default function App() {
   // ── Computed aggregates (ads) ─────────────────────────────────────────────
   const avail=[...new Set([...liveData.meta,...liveData.linkedin,...liveData.google].map(d=>d.yearMonth||d.month).filter(Boolean))].sort();
   const selMonths = useMemo(()=>{
-    if(!adsFromDate&&!adsToDate) return [];
-    const from = adsFromDate ? adsFromDate.slice(0,7) : null;
-    const to   = adsToDate   ? adsToDate.slice(0,7)   : null;
+    // Default: last 3 months when no filter set
+    const now = new Date();
+    const defTo   = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+    const defFrom = `${now.getFullYear()}-${String(now.getMonth()-1).padStart(2,'0')}`;
+    const from = adsFromDate ? adsFromDate.slice(0,7) : (avail.length ? avail.slice(-3)[0] : defFrom);
+    const to   = adsToDate   ? adsToDate.slice(0,7)   : defTo;
     return avail.filter(m=>{
-      if(from&&m<from) return false;
-      if(to&&m>to) return false;
+      if(m<from) return false;
+      if(m>to) return false;
       return true;
     });
   },[adsFromDate,adsToDate,avail]);
@@ -1373,7 +1376,7 @@ export default function App() {
   const NAV=[
     {id:"home",    icon:"⬡",  label:"Overview"},
     {id:"ads",     icon:"📊", label:"Ad Spend"},
-    {id:"crm",     icon:"◈",  label:"Revenue"},
+    {id:"crm",     icon:"◈",  label:"CRM"},
     {id:"invoices",icon:"₹",  label:"Invoices"},
     {id:"estimate",icon:"◎",  label:"Estimate"},
   ];
@@ -1439,12 +1442,17 @@ export default function App() {
         {/* ══ HOME ══════════════════════════════════════════════════════════ */}
         {page==="home"&&(()=>{
           // ── Overview date filter ─────────────────────────────────────────────
+          // Default to last 3 months when no date filter set
+          const now3 = new Date();
+          const defTo   = now3.toISOString().slice(0,10);
+          const defFrom3 = new Date(now3.getFullYear(), now3.getMonth()-2, 1).toISOString().slice(0,10);
+          const activeFrom = ovFrom || defFrom3;
+          const activeTo   = ovTo   || defTo;
           const inOvRange = dateStr => {
-            if(!ovFrom && !ovTo) return true;
             if(!dateStr) return false;
             const d = dateStr.slice(0,10);
-            if(ovFrom && d < ovFrom) return false;
-            if(ovTo   && d > ovTo)   return false;
+            if(d < activeFrom) return false;
+            if(d > activeTo)   return false;
             return true;
           };
 
@@ -1478,9 +1486,9 @@ export default function App() {
 
           const rc=r=>r>=4?"#15803d":r>=2?C.accent:r>=1?"#d97706":r>0?C.down:C.muted;
           const kpis=[
-            {label:"B2B Revenue",      val:fmtINR(b2bRevHome), sub:"Closed+Overdue · B2B invoices",    primary:true, click:()=>setPage("invoices")},
-            {label:"D2C Revenue",      val:fmtINR(d2cRevHome), sub:"Shopify · Amazon · B2C Offline",   col:"#0a66c2",click:()=>setPage("invoices")},
-            {label:"Total Ad Spend",   val:fmtINR(tSpend),     sub:"Meta + LinkedIn + Google",         col:C.primary,click:()=>setPage("ads")},
+            {label:"B2B Revenue",      val:fmtINR(b2bRevHome), primary:true, click:()=>setPage("invoices")},
+            {label:"D2C Revenue",      val:fmtINR(d2cRevHome), col:"#0a66c2",click:()=>setPage("invoices")},
+            {label:"Total Ad Spend",   val:fmtINR(tSpend),     col:C.primary,click:()=>setPage("ads")},
             {label:"B2B ROAS",         val:trueROASHome>0?`${trueROASHome}x`:"—", sub:trueROASHome>=4?"Excellent":trueROASHome>=2?"Good":trueROASHome>=1?"Break-even":trueROASHome>0?"Below BE":"Need invoice+ad data", col:rc(trueROASHome)},
             {label:"D2C ROAS",         val:d2cROAS>0?`${d2cROAS}x`:"—",          sub:d2cROAS>=4?"Excellent":d2cROAS>=2?"Good":d2cROAS>=1?"Break-even":d2cROAS>0?"Below BE":"Need invoice+ad data", col:rc(d2cROAS)},
             {label:"Closed Won (CRM)", val:String(crmB2BWon.length), sub:crmB2BWon.reduce((s,r)=>s+r.amount,0)>0?fmtINR(crmB2BWon.reduce((s,r)=>s+r.amount,0))+" won":"B2B · by closing date", col:"#16a34a", click:()=>setPage("crm")},
@@ -1496,17 +1504,29 @@ export default function App() {
                 {/* Date filter */}
                 <div style={{display:"flex",alignItems:"center",gap:6,background:C.card,border:`1px solid ${C.border}`,borderRadius:10,padding:"5px 12px",boxShadow:"0 1px 4px rgba(45,45,78,0.06)"}}>
                   <span style={{fontSize:10,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>Period</span>
-                  <input type="date" value={ovFrom} onChange={e=>setOvFrom(e.target.value)}
-                    style={{border:"none",background:"transparent",fontSize:11,color:C.text,outline:"none",cursor:"pointer",fontFamily:"inherit"}}/>
-                  <span style={{fontSize:11,color:C.muted}}>to</span>
-                  <input type="date" value={ovTo} onChange={e=>setOvTo(e.target.value)}
-                    style={{border:"none",background:"transparent",fontSize:11,color:C.text,outline:"none",cursor:"pointer",fontFamily:"inherit"}}/>
+                  <input type="date" value={ovFrom} onChange={e=>{
+                    const v=e.target.value; setOvFrom(v);
+                    setAdsFromDate(v); setCrmFromDate(v); setCrmAppliedFrom(v); setInvFromDate(v);
+                  }} style={{border:"none",background:"transparent",fontSize:11,color:C.text,outline:"none",cursor:"pointer",fontFamily:"inherit"}}/>
+                  <span style={{fontSize:11,color:C.muted}}>–</span>
+                  <input type="date" value={ovTo} onChange={e=>{
+                    const v=e.target.value; setOvTo(v);
+                    setAdsToDate(v); setCrmToDate(v); setCrmAppliedTo(v); setInvToDate(v);
+                  }} style={{border:"none",background:"transparent",fontSize:11,color:C.text,outline:"none",cursor:"pointer",fontFamily:"inherit"}}/>
                   {(ovFrom||ovTo)&&(
-                    <button onClick={()=>{setOvFrom("");setOvTo("");}}
-                      style={{background:"none",border:"none",color:C.muted,cursor:"pointer",fontSize:12,padding:"0 2px",fontWeight:700}}>✕</button>
+                    <button onClick={()=>{
+                      setOvFrom(""); setOvTo("");
+                      setAdsFromDate(""); setAdsToDate("");
+                      setCrmFromDate(""); setCrmToDate(""); setCrmAppliedFrom(""); setCrmAppliedTo("");
+                      setInvFromDate(""); setInvToDate("");
+                    }} style={{background:"none",border:"none",color:C.muted,cursor:"pointer",fontSize:12,padding:"0 2px",fontWeight:700}}>✕</button>
                   )}
                 </div>
-                {/* Sync button */}
+                {/* Last sync timestamp only */}
+                {zohoLastSync&&<span style={{fontSize:10,color:C.muted}}>Last sync: {zohoLastSync}</span>}
+                {/* Status dot */}
+                <div style={{width:6,height:6,borderRadius:"50%",background:hasLive||invoiceData.length||crmData.length?"#22c55e":"#f59e0b"}}/>
+                {/* Sync button — pushed to far right */}
                 <button onClick={syncZoho} disabled={zohoSyncing}
                   style={{background:zohoSyncing?"rgba(45,45,78,0.1)":C.primary,color:zohoSyncing?C.muted:"#fff",
                     border:"none",borderRadius:8,padding:"6px 14px",fontSize:11,fontWeight:700,cursor:zohoSyncing?"not-allowed":"pointer",
@@ -1515,15 +1535,6 @@ export default function App() {
                     ? <><span style={{display:"inline-block",animation:"spin 1s linear infinite"}}>⟳</span> Syncing...</>
                     : <><span>⚡</span> Sync Now</>}
                 </button>
-                {/* Data status */}
-                <div style={{display:"flex",alignItems:"center",gap:5}}>
-                  <div style={{width:6,height:6,borderRadius:"50%",background:hasLive||invoiceData.length||crmData.length?"#22c55e":"#f59e0b"}}/>
-                  <span style={{fontSize:11,color:C.muted}}>{[hasLive&&"Ads",invoiceData.length&&"Inv",crmData.length&&"CRM"].filter(Boolean).join(" · ")||"No data"}</span>
-                </div>
-                {zohoLastSync&&<span style={{fontSize:10,color:C.muted}}>Last: {zohoLastSync}</span>}
-                {zohoSyncStatus&&typeof zohoSyncStatus==="string"&&(
-                  <div style={{fontSize:10,color:C.accent,fontWeight:600,maxWidth:300,lineHeight:1.4}}>{zohoSyncStatus}</div>
-                )}
               </div>
             </div>
 
@@ -1652,52 +1663,26 @@ export default function App() {
                       </button>
                     );
                   })}
-                  <div style={{display:"flex",alignItems:"center",gap:5}}>
-                    <span style={{fontSize:10,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1,whiteSpace:"nowrap"}}>Budget ₹</span>
-                    <input value={budgetGoal} onChange={e=>setBudgetGoal(e.target.value)} placeholder="e.g. 300000"
-                      style={{width:100,border:`1px solid ${C.border}`,borderRadius:6,padding:"3px 7px",fontSize:11,color:C.text,background:C.card,outline:"none",fontFamily:"'DM Mono',monospace",fontWeight:600}}/>
-                  </div>
+
                 </div>
               </div>
 
               {/* ── KPI Grid ───────────────────────────────────────────────── */}
               <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:8}}>
-                <KPI label="Total Spend"  value={fmtINR(tSpend)} sub={selMonths.length?`${selMonths.join(", ")}`:undefined} icon="💸" green curr={tSpend} prev={prevSpend}/>
+                <KPI label="Total Spend"  value={fmtINR(tSpend)} icon="💸" green curr={tSpend} prev={prevSpend}/>
                 {(activeChan==="all"||activeChan==="Meta")&&liveData.meta.length>0&&
-                  <KPI label="Meta" value={fmtINR(mAgg.spend)} sub={`${tSpend?pct(mAgg.spend,tSpend):0}%`} icon="Ⓜ" color={C.meta} curr={mAgg.spend} prev={pmd.reduce((s,r)=>s+r.spend,0)}/>}
+                  <KPI label="Meta" value={fmtINR(mAgg.spend)} icon="Ⓜ" color={C.meta} curr={mAgg.spend} prev={pmd.reduce((s,r)=>s+r.spend,0)}/>}
                 {(activeChan==="all"||activeChan==="LinkedIn")&&liveData.linkedin.length>0&&
-                  <KPI label="LinkedIn" value={fmtINR(lAgg.spend)} sub={`${tSpend?pct(lAgg.spend,tSpend):0}%`} icon="🔗" color={C.li} curr={lAgg.spend} prev={pld.reduce((s,r)=>s+r.spend,0)}/>}
+                  <KPI label="LinkedIn" value={fmtINR(lAgg.spend)} icon="🔗" color={C.li} curr={lAgg.spend} prev={pld.reduce((s,r)=>s+r.spend,0)}/>}
                 {(activeChan==="all"||activeChan==="Google")&&liveData.google.length>0&&
-                  <KPI label="Google" value={fmtINR(gAgg.spend)} sub={`${tSpend?pct(gAgg.spend,tSpend):0}%`} icon="G" color={C.google} curr={gAgg.spend} prev={pgd.reduce((s,r)=>s+r.spend,0)}/>}
+                  <KPI label="Google" value={fmtINR(gAgg.spend)} icon="G" color={C.google} curr={gAgg.spend} prev={pgd.reduce((s,r)=>s+r.spend,0)}/>}
                 <KPI label="Total Leads"  value={tLeads?fmtNum(tLeads):"—"} icon="🎯" curr={tLeads} prev={prevLeads}/>
                 <KPI label={activeChan==="all"?"Blended CPL":"CPL"} value={bCPL?`₹${bCPL}`:"—"} icon="⚡" color={C.accent} curr={bCPL} prev={prevCPL} invertDelta/>
                 <KPI label="CTR" value={bCTR?`${bCTR}%`:"—"} icon="👆" curr={bCTR} prev={pAgg.impressions?parseFloat(((pAgg.clicks/pAgg.impressions)*100).toFixed(2)):0}/>
                 <KPI label="Avg CPC" value={bCPC?`₹${bCPC}`:"—"} icon="🖱" color={C.sub} curr={bCPC} prev={pAgg.clicks?Math.round(pAgg.spend/pAgg.clicks):0} invertDelta/>
                 <KPI label="Impressions" value={fmtNum(tImpr)} icon="👁"/>
-                {budgetGoal&&budgetUsed&&(
-                  <KPI label="Budget Used" value={`${budgetUsed}%`} icon="🎯"
-                    color={parseFloat(budgetUsed)>100?C.down:parseFloat(budgetUsed)>80?C.accentMid:C.accent}
-                    sub={`of ${fmtINR(parseFloat(budgetGoal))}`}/>
-                )}
+                
               </div>
-
-              {/* Budget pacing */}
-              {budgetGoal&&budgetUsed&&(
-                <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:11,padding:"14px 18px",boxShadow:"0 1px 3px rgba(0,0,0,0.04)"}}>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-                    <span style={{fontSize:11,fontWeight:700,color:C.text}}>Budget Pacing</span>
-                    <span style={{fontSize:11,color:C.muted}}>Spent {fmtINR(tSpend)} of {fmtINR(parseFloat(budgetGoal))} goal</span>
-                  </div>
-                  <div style={{background:C.border,borderRadius:4,height:8,overflow:"hidden"}}>
-                    <div style={{height:"100%",borderRadius:4,width:`${Math.min(parseFloat(budgetUsed),100)}%`,background:parseFloat(budgetUsed)>100?C.down:parseFloat(budgetUsed)>80?C.accentMid:C.accent,transition:"width .4s"}}/>
-                  </div>
-                  <div style={{display:"flex",justifyContent:"space-between",marginTop:5}}>
-                    <span style={{fontSize:10,color:C.muted}}>0%</span>
-                    <span style={{fontSize:10,fontWeight:700,color:parseFloat(budgetUsed)>100?C.down:C.accent}}>{budgetUsed}% used</span>
-                    <span style={{fontSize:10,color:C.muted}}>100%</span>
-                  </div>
-                </div>
-              )}
 
               {/* Spend Distribution */}
               <div>
@@ -2134,7 +2119,7 @@ export default function App() {
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:8}}>
               <div>
                 <div style={{fontSize:10,color:C.muted,textTransform:'uppercase',letterSpacing:2,fontWeight:700,marginBottom:2}}>Without® · CRM</div>
-                <h1 style={{fontSize:20,fontWeight:800,letterSpacing:-.5}}>Revenue</h1>
+                <h1 style={{fontSize:20,fontWeight:800,letterSpacing:-.5}}>CRM</h1>
               </div>
               <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
                 <DatePill from={crmFromDate} setFrom={v=>{setCrmFromDate(v);setCrmAppliedFrom(v);}} to={crmToDate} setTo={v=>{setCrmToDate(v);setCrmAppliedTo(v);}}/>
@@ -2403,52 +2388,54 @@ export default function App() {
                 );
               })()}
 
-              {/* ── All deals table ───────────────────────────────────────── */}
-              <div>
-                <SectionHead title="All Deals" sub={`${allFiltered.length} in date range · sorted by closing date`}/>
-                <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:12,overflow:'hidden',boxShadow:'0 1px 3px rgba(0,0,0,0.04)'}}>
-                  <div style={{overflowX:'auto'}}>
-                  <table style={{width:'100%',borderCollapse:'collapse',fontSize:11,minWidth:600}}>
-                    <thead>
-                      <tr style={{background:C.cardAlt}}>
-                        {['Deal','Account','Type','Stage','Closing','Amount','Owner'].map(h=>(
-                          <th key={h} style={{textAlign:'left',padding:'7px 10px',color:C.muted,fontWeight:700,fontSize:9,textTransform:'uppercase',letterSpacing:0.7,whiteSpace:'nowrap'}}>{h}</th>
+              {/* ── Monthly Won Amount (from CRM Amount field) ────────────── */}
+              {(()=>{
+                // Build monthly won amount from b2bWon deals — grouped by closing month
+                const wonByMonth = {};
+                b2bWon.forEach(d => {
+                  if(!d.closingMonth||!d.closingYear||!d.amount) return;
+                  const key = `${d.closingYear}-${String(MONTHS_ORDER.indexOf(d.closingMonth)+1).padStart(2,'0')}`;
+                  if(!wonByMonth[key]) wonByMonth[key] = {label:`${d.closingMonth} ${d.closingYear}`, amount:0, count:0};
+                  wonByMonth[key].amount += d.amount;
+                  wonByMonth[key].count++;
+                });
+                const wonMonthArr = Object.keys(wonByMonth).sort().slice(-12).map(k=>wonByMonth[k]);
+                if(!wonMonthArr.length) return null;
+                return(
+                <div>
+                  <SectionHead title="Monthly Won Revenue" sub="from CRM Amount field · Closed Won B2B deals"/>
+                  <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:12,padding:"18px",boxShadow:"0 1px 3px rgba(0,0,0,0.04)"}}>
+                    <ResponsiveContainer width="100%" height={220}>
+                      <BarChart data={wonMonthArr} barSize={18}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#efefef" vertical={false}/>
+                        <XAxis dataKey="label" tick={{fill:C.muted,fontSize:10}} axisLine={false} tickLine={false}/>
+                        <YAxis tickFormatter={v=>fmtINR(v)} tick={{fill:C.muted,fontSize:9}} axisLine={false} tickLine={false}/>
+                        <Tooltip formatter={(v,n,p)=>[fmtINR(v),`Won Revenue (${p.payload.count} deals)`]} contentStyle={{background:"#fff",border:`1px solid ${C.border}`,borderRadius:7,fontSize:11}}/>
+                        <Bar dataKey="amount" fill={C.accent} radius={[4,4,0,0]} name="Won Revenue"/>
+                      </BarChart>
+                    </ResponsiveContainer>
+                    {/* Monthly table below chart */}
+                    <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,marginTop:12}}>
+                      <thead><tr style={{background:C.cardAlt}}>
+                        {["Month","Deals Won","Amount Won","Avg Deal Size"].map(h=>(
+                          <th key={h} style={{textAlign:"left",padding:"6px 10px",color:C.muted,fontWeight:700,fontSize:9,textTransform:"uppercase",letterSpacing:0.7}}>{h}</th>
                         ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {[...allFiltered].sort((a,b)=>(b.closing||'').localeCompare(a.closing||'')).slice(0,60).map((d,i)=>{
-                        const sc = d.stageClass;
-                        const stageCol = sc==='closedWon'?'#16a34a':sc==='closedLost'?C.down:sc==='lostFA'?'#f59e0b':'#7c3aed';
-                        const stageBg  = sc==='closedWon'?'#f0fdf4':sc==='closedLost'?'#fef2f2':sc==='lostFA'?'#fffbeb':'#f5f3ff';
-                        const stageLabel = sc==='closedWon'?'Won':sc==='closedLost'?'Lost':sc==='lostFA'?'Lost (FA)':'Active';
-                        const isB2B = d.isB2B;
-                        return(
-                        <tr key={d.id} className="tr" style={{borderTop:`1px solid ${C.border}`,opacity:isB2B?1:0.65}}>
-                          <td style={{padding:'7px 10px',fontWeight:600,color:C.text,maxWidth:160,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{d.name||'—'}</td>
-                          <td style={{padding:'7px 10px',color:C.sub,maxWidth:130,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{d.account||'—'}</td>
-                          <td style={{padding:'7px 10px'}}>
-                            <span style={{fontSize:9.5,fontWeight:700,padding:'2px 6px',borderRadius:4,
-                              background:isB2B?`${C.accent}12`:C.cardAlt,
-                              color:isB2B?C.accent:C.muted}}>
-                              {(d.type||'—').replace(/^B2B\s*/,'')}
-                            </span>
-                          </td>
-                          <td style={{padding:'7px 10px'}}>
-                            <span style={{fontSize:9.5,fontWeight:700,padding:'2px 7px',borderRadius:4,background:stageBg,color:stageCol}}>{stageLabel}</span>
-                          </td>
-                          <td style={{padding:'7px 10px',color:C.muted,fontSize:10,fontFamily:"'DM Mono',monospace"}}>{d.closing||'—'}</td>
-                          <td style={{padding:'7px 10px',fontFamily:"'DM Mono',monospace",fontWeight:700,color:d.amount>0?C.accent:C.muted}}>{d.amount>0?fmtINR(d.amount):'—'}</td>
-                          <td style={{padding:'7px 10px',color:C.muted,fontSize:10,maxWidth:100,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{d.owner||'—'}</td>
-                        </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                  {allFiltered.length>60&&<div style={{padding:'8px 12px',fontSize:11,color:C.muted,textAlign:'center',background:C.cardAlt}}>Showing 60 of {allFiltered.length} deals</div>}
+                      </tr></thead>
+                      <tbody>
+                        {[...wonMonthArr].reverse().map(r=>(
+                          <tr key={r.label} className="tr" style={{borderTop:`1px solid ${C.border}`}}>
+                            <td style={{padding:"7px 10px",fontWeight:700,color:C.text}}>{r.label}</td>
+                            <td style={{padding:"7px 10px",color:C.sub}}>{r.count}</td>
+                            <td style={{padding:"7px 10px",fontFamily:"'DM Mono',monospace",fontWeight:700,color:C.accent}}>{fmtINR(r.amount)}</td>
+                            <td style={{padding:"7px 10px",fontFamily:"'DM Mono',monospace",color:C.sub}}>{fmtINR(Math.round(r.amount/r.count))}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
-              </div>
+                );
+              })()}
 
             </>)}
           </div>
@@ -2673,76 +2660,9 @@ export default function App() {
                 </div>
                 )}
 
-                {/* Closed vs Overdue */}
-                <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:16,padding:"18px",boxShadow:"0 2px 10px rgba(45,45,78,0.06)"}}>
-                  <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:12}}>Closed vs Overdue</div>
-                  <div style={{display:"flex",flexDirection:"column",gap:10}}>
-                    {[{label:"Closed",value:closedRev,color:"#16a34a",count:allInv.filter(r=>r.status==="Closed").length},{label:"Overdue",value:overdueRev,color:C.down,count:allInv.filter(r=>r.status==="Overdue").length}].map(s=>(
-                      <div key={s.label}>
-                        <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}>
-                          <span style={{fontSize:11,fontWeight:700,color:s.color}}>{s.label} <span style={{fontWeight:400,color:C.muted}}>({s.count} inv)</span></span>
-                          <span style={{fontSize:11,fontWeight:700,fontFamily:"'DM Mono',monospace"}}>{fmtINR(s.value)}</span>
-                        </div>
-                        <div style={{background:C.border,borderRadius:3,height:8,overflow:"hidden"}}>
-                          <div style={{height:"100%",background:s.color,borderRadius:3,width:`${totalRev?((s.value/totalRev)*100):0}%`,transition:"width .4s"}}/>
-                        </div>
-                        <div style={{fontSize:10,color:C.muted,marginTop:3}}>{totalRev?((s.value/totalRev)*100).toFixed(1):0}% of total</div>
-                      </div>
-                    ))}
-                  </div>
-                  {/* Type breakdown mini */}
-                  <div style={{borderTop:`1px solid ${C.border}`,marginTop:14,paddingTop:12}}>
-                    <div style={{fontSize:10,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>By Type</div>
-                    {typeData.map((t,i)=>(
-                      <div key={t.type} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5}}>
-                        <span style={{fontSize:11,color:C.sub}}>{t.type.replace("B2B ","")}</span>
-                        <div style={{display:"flex",gap:8,alignItems:"center"}}>
-                          <span style={{fontSize:10,color:C.muted}}>{t.count} inv</span>
-                          <span style={{fontSize:11,fontWeight:700,fontFamily:"'DM Mono',monospace",color:typeColors[i%typeColors.length]}}>{fmtINR(t.subtotal)}</span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
               </div>
 
-              {/* Top customers table */}
-              <div>
-                <SectionHead title="Top B2B Customers" sub="by revenue · deduplicated invoices"/>
-                <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:16,overflow:"hidden",boxShadow:"0 2px 10px rgba(45,45,78,0.06)"}}>
-                  <div style={{overflowX:"auto"}}>
-                  <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,tableLayout:"fixed",minWidth:480}}>
-                    <thead>
-                      <tr style={{background:C.cardAlt}}>
-                        {["#","Customer","Business Type","Invoices","Revenue (₹)","Status"].map(h=>(
-                          <th key={h} style={{textAlign:"left",padding:"7px 10px",color:C.muted,fontWeight:700,fontSize:9,textTransform:"uppercase",letterSpacing:0.7,whiteSpace:"nowrap"}}>{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {topCust.map((c,i)=>(
-                        <tr key={c.customer} className="tr" style={{borderTop:`1px solid ${C.border}`}}>
-                          <td style={{padding:"8px 10px",fontWeight:800,color:i===0?C.accent:C.muted,fontSize:12}}>{i+1}</td>
-                          <td style={{padding:"8px 10px",fontWeight:600,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.customer}</td>
-                          <td style={{padding:"8px 10px"}}>
-                            {[...new Set(allInv.filter(r=>r.customer===c.customer).map(r=>r.businessType))].map(bt=>(
-                              <span key={bt} style={{fontSize:9.5,fontWeight:700,padding:"2px 6px",borderRadius:4,background:`${C.accent}12`,color:C.accent,marginRight:3}}>{bt.replace("B2B ","")}</span>
-                            ))}
-                          </td>
-                          <td style={{padding:"8px 10px",color:C.sub}}>{c.count}</td>
-                          <td style={{padding:"8px 10px",fontFamily:"'DM Mono',monospace",fontWeight:700,color:C.text}}>{fmtINR(c.subtotal)}</td>
-                          <td style={{padding:"8px 10px"}}>
-                            <span style={{fontSize:9.5,fontWeight:700,padding:"2px 7px",borderRadius:4,
-                              background:c.statuses.includes("Overdue")?"#fef2f2":"#f0fdf4",
-                              color:c.statuses.includes("Overdue")?C.down:"#16a34a"}}>{c.statuses}</span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  </div>
-                </div>
-              </div>
+
 
               {/* All invoices list */}
               <div>
