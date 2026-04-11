@@ -1339,13 +1339,19 @@ export default function App() {
   const gd=liveData.google.filter(d=>inSel(d.yearMonth||d.month));
   const agg=arr=>arr.reduce((a,r)=>({spend:a.spend+r.spend,leads:a.leads+r.leads,clicks:a.clicks+r.clicks,impressions:a.impressions+r.impressions,reach:a.reach+(r.reach||0)}),{spend:0,leads:0,clicks:0,impressions:0,reach:0});
   const mAgg=agg(md); const lAgg=agg(ld); const gAgg=agg(gd);
-  const tSpend=mAgg.spend+lAgg.spend+gAgg.spend;
-  const tLeads=mAgg.leads+lAgg.leads+gAgg.leads;
-  const tClicks=mAgg.clicks+lAgg.clicks+gAgg.clicks;
-  const tImpr=mAgg.impressions+lAgg.impressions+gAgg.impressions;
-  const bCPL=tLeads>0?Math.round(tSpend/tLeads):0;
-  const bCTR=tImpr>0?parseFloat(((tClicks/tImpr)*100).toFixed(2)):0;
-  const bCPC=tClicks>0?Math.round(tSpend/tClicks):0;
+  // Channel-aware totals — respect activeChan filter
+  const chanAgg = activeChan==="all"
+    ? agg([...md,...ld,...gd])
+    : activeChan==="Meta"     ? mAgg
+    : activeChan==="LinkedIn" ? lAgg
+    : gAgg;
+  const tSpend  = activeChan==="all" ? mAgg.spend+lAgg.spend+gAgg.spend : chanAgg.spend;
+  const tLeads  = chanAgg.leads;
+  const tClicks = chanAgg.clicks;
+  const tImpr   = chanAgg.impressions;
+  const bCPL    = tLeads>0?Math.round(tSpend/tLeads):0;
+  const bCTR    = tImpr>0?parseFloat(((tClicks/tImpr)*100).toFixed(2)):0;
+  const bCPC    = tClicks>0?Math.round(tSpend/tClicks):0;
   // Use yearMonth ("2026-01") as the canonical key — preserves year context
   const allM=[...new Set([...md,...ld,...gd].map(r=>r.yearMonth||r.month))].sort();
   const ymLabel = ym => { // "2026-01" → "Jan 2026"
@@ -1358,8 +1364,10 @@ export default function App() {
   const pmd=liveData.meta.filter(d=>pInSel(d.yearMonth||d.month));
   const pld=liveData.linkedin.filter(d=>pInSel(d.yearMonth||d.month));
   const pgd=liveData.google.filter(d=>pInSel(d.yearMonth||d.month));
-  const pAgg=agg([...pmd,...pld,...pgd]);
-  const prevSpend=pAgg.spend; const prevLeads=pAgg.leads; const prevCPL=pAgg.leads>0?Math.round(pAgg.spend/pAgg.leads):0;
+  const pAggAll=agg([...pmd,...pld,...pgd]);
+  const pAggMeta=agg(pmd); const pAggLI=agg(pld); const pAggGoogle=agg(pgd);
+  const pAgg = activeChan==="all" ? pAggAll : activeChan==="Meta" ? pAggMeta : activeChan==="LinkedIn" ? pAggLI : pAggGoogle;
+  const prevSpend=activeChan==="all"?pAggAll.spend:pAgg.spend; const prevLeads=pAgg.leads; const prevCPL=pAgg.leads>0?Math.round(pAgg.spend/pAgg.leads):0;
   const hasLive=liveData.meta.length>0||liveData.linkedin.length>0||liveData.google.length>0;
   const pieData=[{name:"Meta",value:mAgg.spend,color:C.meta},{name:"LinkedIn",value:lAgg.spend,color:C.li},{name:"Google",value:gAgg.spend,color:C.google}].filter(p=>p.value>0);
 
@@ -1699,7 +1707,7 @@ export default function App() {
                   <KPI label="LinkedIn" value={fmtINR(lAgg.spend)} icon="🔗" color={C.li} curr={lAgg.spend} prev={pld.reduce((s,r)=>s+r.spend,0)}/>}
                 {(activeChan==="all"||activeChan==="Google")&&liveData.google.length>0&&
                   <KPI label="Google" value={fmtINR(gAgg.spend)} icon="G" color={C.google} curr={gAgg.spend} prev={pgd.reduce((s,r)=>s+r.spend,0)}/>}
-                <KPI label="Total Leads"  value={tLeads?fmtNum(tLeads):"—"} icon="🎯" curr={tLeads} prev={prevLeads}/>
+                <KPI label={activeChan==="all"?"Total Leads":`${activeChan} Leads`}  value={tLeads?fmtNum(tLeads):"—"} icon="🎯" curr={tLeads} prev={prevLeads}/>
                 <KPI label={activeChan==="all"?"Blended CPL":"CPL"} value={bCPL?`₹${bCPL}`:"—"} icon="⚡" color={C.accent} curr={bCPL} prev={prevCPL} invertDelta/>
                 <KPI label="CTR" value={bCTR?`${bCTR}%`:"—"} icon="👆" curr={bCTR} prev={pAgg.impressions?parseFloat(((pAgg.clicks/pAgg.impressions)*100).toFixed(2)):0}/>
                 <KPI label="Avg CPC" value={bCPC?`₹${bCPC}`:"—"} icon="🖱" color={C.sub} curr={bCPC} prev={pAgg.clicks?Math.round(pAgg.spend/pAgg.clicks):0} invertDelta/>
@@ -2168,7 +2176,7 @@ export default function App() {
                   { label:'Lost (FA)',      value:b2bLostFA.length,  sub:'Internal Issues FA · by closing date',                             bg:'#fffbeb', col:'#f59e0b' },
                   { label:'Closed Lost',    value:b2bLost.length,    sub:`${winRate}% win rate · by closing date`,                           bg:'#fef2f2', col:C.down    },
                   { label:'Active Pipeline',value:b2bActive.length,  sub:`${fmtINR(pipelineValue)} total · not yet closed`,                  bg:'#f5f3ff', col:'#7c3aed' },
-                  { label:'Others',         value:otherFiltered.length, sub:'Non-B2B · Grants, Waste, CSR etc',                              bg:C.cardAlt,  col:C.muted  },
+                  { label:'Won Revenue',    value:fmtINR(wonValue),     sub:`${b2bWon.length} B2B deals booked`,                            bg:'#f0fdf4',  col:'#16a34a' },
                 ].map(k=>(
                   <div key={k.label} style={{background:k.bg,border:`1px solid ${k.col}22`,borderRadius:12,padding:'16px'}}>
                     <div style={{fontSize:9,color:k.col,textTransform:'uppercase',letterSpacing:1,fontWeight:700,marginBottom:6}}>{k.label}</div>
