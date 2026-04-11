@@ -2214,11 +2214,11 @@ export default function App() {
               {/* ── Main KPI row ──────────────────────────────────────────── */}
               <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(150px,1fr))',gap:8}}>
                 {[
-                  { label:'Closed Won',     value:b2bWon.length,    sub: wonValue>0?`${fmtINR(wonValue)} booked`:'B2B · by closing date',   bg:'#f0fdf4', col:'#16a34a' },
-                  { label:'Lost (FA)',      value:b2bLostFA.length,  sub:'Internal Issues FA · by closing date',                             bg:'#fffbeb', col:'#f59e0b' },
-                  { label:'Closed Lost',    value:b2bLost.length,    sub:`${winRate}% win rate · by closing date`,                           bg:'#fef2f2', col:C.down    },
-                  { label:'Active Pipeline',value:b2bActive.length,  sub:`${fmtINR(pipelineValue)} total · not yet closed`,                  bg:'#f5f3ff', col:'#7c3aed' },
-                  { label:'Won Revenue',    value:fmtINR(wonValue),     sub:`${b2bWon.length} B2B deals booked`,                            bg:'#f0fdf4',  col:'#16a34a' },
+                  { label:'Closed Won',     value:fmtNum(b2bWon.length),    sub: wonValue>0?`${fmtINR(wonValue)} booked`:'B2B · by closing date',   bg:'#f0fdf4', col:'#16a34a' },
+                  { label:'Lost (FA)',      value:fmtNum(b2bLostFA.length),  sub:'Internal Issues FA · by closing date',                             bg:'#fffbeb', col:'#f59e0b' },
+                  { label:'Closed Lost',    value:fmtNum(b2bLost.length),    sub:`${winRate}% win rate · by closing date`,                           bg:'#fef2f2', col:C.down    },
+                  { label:'Active Pipeline',value:fmtNum(b2bActive.length),  sub:`${fmtINR(pipelineValue)} total · not yet closed`,                  bg:'#f5f3ff', col:'#7c3aed' },
+                  { label:'Won Revenue',    value:fmtINR(wonValue),          sub:`${fmtNum(b2bWon.length)} deals booked`,                                    bg:'#f0fdf4',  col:'#16a34a' },
                 ].map(k=>(
                   <div key={k.label} style={{background:k.bg,border:`1px solid ${k.col}22`,borderRadius:12,padding:'16px'}}>
                     <div style={{fontSize:9,color:k.col,textTransform:'uppercase',letterSpacing:1,fontWeight:700,marginBottom:6}}>{k.label}</div>
@@ -2269,12 +2269,12 @@ export default function App() {
                 {b2bActive.length>0&&(
                 <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:12,padding:'16px',boxShadow:'0 1px 3px rgba(0,0,0,0.04)'}}>
                   <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:4}}>Active Leads by Type</div>
-                  <div style={{fontSize:10,color:C.muted,marginBottom:12}}>{b2bActive.length} B2B deals in pipeline</div>
+                  <div style={{fontSize:10,color:C.muted,marginBottom:12}}>{fmtNum(b2bActive.length)} B2B deals in pipeline</div>
                   {typeArr.filter(t=>t.active>0).map((t,i)=>(
                     <div key={t.type} style={{marginBottom:10}}>
                       <div style={{display:'flex',justifyContent:'space-between',marginBottom:3}}>
                         <span style={{fontSize:11,color:C.text,fontWeight:600}}>{t.type.replace(/^B2B\s*/,'')}</span>
-                        <span style={{fontSize:11,fontWeight:800,color:'#7c3aed',fontFamily:"'DM Mono',monospace"}}>{t.active}</span>
+                        <span style={{fontSize:11,fontWeight:800,color:'#7c3aed',fontFamily:"'DM Mono',monospace"}}>{fmtNum(t.active)}</span>
                       </div>
                       <div style={{background:C.border,borderRadius:3,height:6,overflow:'hidden'}}>
                         <div style={{height:'100%',background:'#7c3aed',borderRadius:3,
@@ -2305,11 +2305,11 @@ export default function App() {
                         return(
                         <tr key={t.type} className="tr" style={{borderTop:`1px solid ${C.border}`}}>
                           <td style={{padding:'8px 10px',fontWeight:700,color:C.text}}>{t.type.replace(/^B2B\s*/,'')}</td>
-                          <td style={{padding:'8px 10px',color:C.sub,fontFamily:"'DM Mono',monospace",fontWeight:600}}>{t.total}</td>
+                          <td style={{padding:'8px 10px',color:C.sub,fontFamily:"'DM Mono',monospace",fontWeight:600}}>{fmtNum(t.total)}</td>
                           <td style={{padding:'8px 10px'}}><span style={{background:'#f5f3ff',color:'#7c3aed',fontWeight:700,padding:'2px 8px',borderRadius:4,fontSize:10,fontFamily:"'DM Mono',monospace"}}>{t.active}</span></td>
-                          <td style={{padding:'8px 10px'}}><span style={{background:'#f0fdf4',color:'#16a34a',fontWeight:700,padding:'2px 8px',borderRadius:4,fontSize:10,fontFamily:"'DM Mono',monospace"}}>{t.won}</span></td>
+                          <td style={{padding:'8px 10px'}}><span style={{background:'#f0fdf4',color:'#16a34a',fontWeight:700,padding:'2px 8px',borderRadius:4,fontSize:10,fontFamily:"'DM Mono',monospace"}}>{fmtNum(t.won)}</span></td>
                           <td style={{padding:'8px 10px',color:'#f59e0b',fontFamily:"'DM Mono',monospace",fontWeight:600}}>{t.lostFA}</td>
-                          <td style={{padding:'8px 10px'}}><span style={{background:'#fef2f2',color:C.down,fontWeight:700,padding:'2px 8px',borderRadius:4,fontSize:10,fontFamily:"'DM Mono',monospace"}}>{t.lost}</span></td>
+                          <td style={{padding:'8px 10px'}}><span style={{background:'#fef2f2',color:C.down,fontWeight:700,padding:'2px 8px',borderRadius:4,fontSize:10,fontFamily:"'DM Mono',monospace"}}>{fmtNum(t.lost)}</span></td>
                           <td style={{padding:'8px 10px'}}><span style={{fontWeight:700,color:wrc,fontFamily:"'DM Mono',monospace"}}>{wr}%</span></td>
                           <td style={{padding:'8px 10px',fontFamily:"'DM Mono',monospace",fontWeight:600,color:t.value>0?C.accent:C.muted}}>{t.value>0?fmtINR(t.value):'—'}</td>
                         </tr>
@@ -2318,8 +2318,8 @@ export default function App() {
                       <tr style={{borderTop:`2px solid ${C.border}`,background:C.cardAlt}}>
                         <td style={{padding:'8px 10px',fontWeight:800,color:C.text}}>TOTAL B2B</td>
                         <td style={{padding:'8px 10px',fontWeight:800,fontFamily:"'DM Mono',monospace"}}>{b2bFiltered.length}</td>
-                        <td style={{padding:'8px 10px',fontWeight:800,color:'#7c3aed',fontFamily:"'DM Mono',monospace"}}>{b2bActive.length}</td>
-                        <td style={{padding:'8px 10px',fontWeight:800,color:'#16a34a',fontFamily:"'DM Mono',monospace"}}>{b2bWon.length}</td>
+                        <td style={{padding:'8px 10px',fontWeight:800,color:'#7c3aed',fontFamily:"'DM Mono',monospace"}}>{fmtNum(b2bActive.length)}</td>
+                        <td style={{padding:'8px 10px',fontWeight:800,color:'#16a34a',fontFamily:"'DM Mono',monospace"}}>{fmtNum(b2bWon.length)}</td>
                         <td style={{padding:'8px 10px',fontWeight:800,color:'#f59e0b',fontFamily:"'DM Mono',monospace"}}>{b2bLostFA.length}</td>
                         <td style={{padding:'8px 10px',fontWeight:800,color:C.down,fontFamily:"'DM Mono',monospace"}}>{b2bLost.length}</td>
                         <td style={{padding:'8px 10px',fontWeight:800,color:C.accent,fontFamily:"'DM Mono',monospace"}}>{winRate}%</td>
