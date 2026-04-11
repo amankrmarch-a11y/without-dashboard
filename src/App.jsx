@@ -1466,16 +1466,10 @@ export default function App() {
 
   // ── Computed aggregates (ads) ─────────────────────────────────────────────
   // Enrich stored records with cpl/ctr if not already computed (handles old localStorage cache)
-  const enrichAds = arr => arr.map(r => ({
-    ...r,
-    cpl: r.cpl || (r.leads>0 ? Math.round(r.spend/r.leads) : 0),
-    ctr: r.ctr || (r.impressions>0 ? parseFloat(((r.clicks/r.impressions)*100).toFixed(2)) : 0),
-    cpc: r.cpc || (r.clicks>0 ? Math.round(r.spend/r.clicks) : 0),
-  }));
-  const enrichedMeta     = enrichAds(liveData.meta);
-  const enrichedLinkedIn = enrichAds(liveData.linkedin);
-  const enrichedGoogle   = enrichAds(liveData.google);
-  const avail=[...new Set([...enrichedMeta,...enrichedLinkedIn,...enrichedGoogle].map(d=>d.yearMonth||d.month).filter(Boolean))].sort();
+  const enrichedMeta     = useMemo(()=>liveData.meta.map(r=>({...r,cpl:r.cpl||(r.leads>0?Math.round(r.spend/r.leads):0),ctr:r.ctr||(r.impressions>0?parseFloat(((r.clicks/r.impressions)*100).toFixed(2)):0),cpc:r.cpc||(r.clicks>0?Math.round(r.spend/r.clicks):0)})),[liveData.meta]);
+  const enrichedLinkedIn = useMemo(()=>liveData.linkedin.map(r=>({...r,cpl:r.cpl||(r.leads>0?Math.round(r.spend/r.leads):0),ctr:r.ctr||(r.impressions>0?parseFloat(((r.clicks/r.impressions)*100).toFixed(2)):0),cpc:r.cpc||(r.clicks>0?Math.round(r.spend/r.clicks):0)})),[liveData.linkedin]);
+  const enrichedGoogle   = useMemo(()=>liveData.google.map(r=>({...r,cpl:r.cpl||(r.leads>0?Math.round(r.spend/r.leads):0),ctr:r.ctr||(r.impressions>0?parseFloat(((r.clicks/r.impressions)*100).toFixed(2)):0),cpc:r.cpc||(r.clicks>0?Math.round(r.spend/r.clicks):0)})),[liveData.google]);
+  const avail=useMemo(()=>[...new Set([...enrichedMeta,...enrichedLinkedIn,...enrichedGoogle].map(d=>d.yearMonth||d.month).filter(Boolean))].sort(),[enrichedMeta,enrichedLinkedIn,enrichedGoogle]);
   const selMonths = useMemo(()=>{
     // Default: last 3 months when no filter set
     const now = new Date();
@@ -1582,7 +1576,7 @@ export default function App() {
   const timeStr = now.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
 
   return(
-    <div style={{minHeight:"100vh",background:C.bg,color:C.text,fontFamily:"'Inter','Barlow','Helvetica Neue',sans-serif",display:"flex",flexDirection:"column"}}>
+    <div style={{minHeight:"100vh",width:"100%",background:C.bg,color:C.text,fontFamily:"'Inter','Barlow','Helvetica Neue',sans-serif",display:"flex",flexDirection:"column"}}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=DM+Mono:wght@400;500&display=swap');
         *{box-sizing:border-box;margin:0;padding:0;}
@@ -1610,7 +1604,7 @@ export default function App() {
       {/* ── Top Navigation Bar ─────────────────────────────────────────────── */}
       <header style={{background:C.navBg,borderBottom:`1px solid ${C.navBorder}`,position:"sticky",top:0,zIndex:100,boxShadow:"0 2px 12px rgba(26,26,46,0.08)"}}>
         {/* Brand row */}
-        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 28px 0"}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 32px 0"}}>
           <div style={{display:"flex",alignItems:"center",gap:10}}>
             <div style={{width:32,height:32,borderRadius:8,background:"#b5e550",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:9,color:"#1a1a2e",letterSpacing:0.5,flexShrink:0}}>W/O</div>
             <div>
@@ -1624,7 +1618,7 @@ export default function App() {
           </div>
         </div>
         {/* Tab nav row */}
-        <div style={{display:"flex",gap:2,padding:"8px 24px 0",overflowX:"auto"}}>
+        <div style={{display:"flex",gap:2,padding:"8px 32px 0",overflowX:"auto"}}>
           {NAV.map(n=>(
             <button key={n.id} className={`nb${page===n.id?" on":""}`} onClick={()=>setPage(n.id)}
               style={{border:"none",borderRadius:"10px 10px 0 0",padding:"8px 18px",fontSize:12.5,fontWeight:600,cursor:"pointer",
@@ -1641,7 +1635,7 @@ export default function App() {
         </div>
       </header>
 
-      <main style={{flex:1,overflowY:"auto",overflowX:"hidden",padding:"24px 28px 56px",minWidth:0,animation:"fadeIn .3s ease"}}>
+      <main style={{flex:1,overflowY:"auto",overflowX:"hidden",padding:"24px 32px 56px",minWidth:0,animation:"fadeIn .3s ease"}}>
 
         {/* ══ HOME ══════════════════════════════════════════════════════════ */}
         {page==="home"&&(()=>{
