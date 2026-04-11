@@ -123,8 +123,8 @@ const fmtINR = n => {
 };
 const fmtNum = n => {
   if(!n&&n!==0) return "0";
-  if(n>=1000000) return `${(n/1000000).toFixed(1)}M`;
-  if(n>=1000)    return `${(n/1000).toFixed(1)}K`;
+  if(n>=1000000){const v=(n/1000000).toFixed(1);return `${v.replace(/\.?0+$/,'')}M`;}
+  if(n>=1000){const v=(n/1000).toFixed(1);return `${v.replace(/\.?0+$/,'')}K`;}
   return `${Math.round(n)}`;
 };
 const pct = (a,b) => b?((a/b)*100).toFixed(1):"0";
@@ -1191,13 +1191,16 @@ export default function App() {
       // ── Instagram Profile Info ────────────────────────────────────────────────
       if(json.ig_info?.data?.length) {
         const r = json.ig_info.data[0];
+        // Try multiple possible Zoho column name variants
+        const getNum = (keys) => { for(const k of keys){const v=parseFloat(String(r[k]||0).replace(/,/g,''));if(v>0)return v;} return 0; };
+        const getStr = (keys,def='') => { for(const k of keys){if(r[k])return String(r[k]);}  return def; };
         setSocial(prev=>({...prev,
-          igFollowers:parseFloat(String(r['Followers']||0).replace(/,/g,''))||0,
-          igFollowing:parseFloat(String(r['Follows']||r['Following']||0).replace(/,/g,''))||0,
-          igMediaCount:parseFloat(String(r['Media']||0).replace(/,/g,''))||0,
-          igUsername:r['Username']||'shop.without',
+          igFollowers:  getNum(['Followers','Follower Count','followers']),
+          igFollowing:  getNum(['Follows','Following','follows','following']),
+          igMediaCount: getNum(['Media','Posts','media_count','media']),
+          igUsername:   getStr(['Username','username','Handle'],'shop.without'),
         }));
-        results.push(`✅ IG Profile: ${r['Followers']||0} followers`);
+        results.push(`✅ IG Profile: ${r['Followers']||r['Follower Count']||'?'} followers`);
       }
       // ── Instagram Daily Reach ─────────────────────────────────────────────
       if(json.ig_insights?.data?.length) {
@@ -1262,16 +1265,25 @@ export default function App() {
       }
       if(json.li_followers?.data?.length) {
         const rows = json.li_followers.data;
-        const latest = rows.reduce((max,r) => {
-          const n = parseFloat(String(r['Followers Count']||r['Total Followers']||r['Follower Count']||0).replace(/,/g,''))||0;
-          return n > max ? n : max;
-        }, 0);
+        // Debug: log column names on first sync to help diagnose
+        const sampleKeys = rows[0] ? Object.keys(rows[0]) : [];
+        const getFollowerVal = r => {
+          // Try every common Zoho LinkedIn Pages column name variant
+          for(const k of ['Follower Count','Followers Count','Total Followers','followers','follower_count','Count','Organic Followers']){
+            const v=parseFloat(String(r[k]||0).replace(/,/g,''));
+            if(v>100) return v; // followers should be >100 for a real company
+          }
+          // Fallback: find the largest numeric value in the row (likely the follower count)
+          return Math.max(0,...Object.values(r).map(v=>parseFloat(String(v).replace(/,/g,''))||0));
+        };
+        const getDateVal = r => r['Date']||r['date']||r['End Date']||r['Stat Date']||'';
         const byDate = rows.map(r=>({
-          date: r['Date']||r['date']||'',
-          followers: parseFloat(String(r['Followers Count']||r['Total Followers']||r['Follower Count']||0).replace(/,/g,''))||0,
-        })).filter(r=>r.date&&r.followers>0).sort((a,b)=>a.date.localeCompare(b.date));
+          date: getDateVal(r),
+          followers: getFollowerVal(r),
+        })).filter(r=>r.date&&r.followers>100).sort((a,b)=>String(a.date).localeCompare(String(b.date)));
+        const latest = byDate.length ? byDate[byDate.length-1].followers : 0;
         setSocial(prev=>({...prev, liFollowers:byDate, liTotalFollowers:latest}));
-        results.push(`✅ LI Followers: ${byDate.length} entries`);
+        results.push(`✅ LI Followers: ${fmtNum(latest)} total · cols: ${sampleKeys.slice(0,4).join(', ')}`);
       }
       if(json.li_posts?.data?.length) {
         const rows = json.li_posts.data;
@@ -2318,10 +2330,16 @@ export default function App() {
             {/* ── Top KPI row ─────────────────────────────────────────────────── */}
             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:10}}>
               {[
-                {label:"Instagram Followers", val:igFollowers>0?fmtNum(igFollowers):"—",    icon:"📸", col:"#e1306c", sub:igUsername?`@${igUsername}`:undefined},
+                {label:"Instagram Followers", val:igFollowers>0?fmtNum(igFollowers):"—",    icon:"📸", col:"#e1306c",
+                  sub:igUsername?`@${igUsername}`:igReach.length>0?"Check ig_info view":undefined},
                 {label:"IG Reach (period)",   val:igTotalReach>0?fmtNum(igTotalReach):"—",  icon:"👁",  col:"#f77737", sub:igAvgReach>0?`avg ${fmtNum(igAvgReach)}/day`:undefined},
                 {label:"IG Posts",            val:igMediaCount>0?String(igMediaCount):"—",            icon:"🖼",  col:"#833ab4", sub:igFollowing>0?`${fmtNum(igFollowing)} following`:undefined},
-                {label:"LinkedIn Followers",  val:liLatest>0?fmtNum(liLatest):"—",          icon:"💼",  col:"#0a66c2", sub:liGrowth!==0?`${liGrowth>=0?"+":""}${liGrowth}% in period`:undefined},
+                {label:"LinkedIn Followers",  val:liLatest>0?fmtNum(liLatest):"—",          icon:"💼",  col:"#0a66c2",
+                  sub:(()=>{
+                    if(liFolFiltered.length<2) return liLatest>0?"Total followers":undefined;
+                    const delta = liLatest - liFolFiltered[0].followers;
+                    return `${delta>=0?"+":""}${fmtNum(Math.abs(delta))} ${delta>=0?"gained":"lost"} this period`;
+                  })()},
                 {label:"LI Impressions",      val:liTotalImpr>0?fmtNum(liTotalImpr):"—",    icon:"📊",  col:"#0a66c2", sub:liCTR>0?`${liCTR}% CTR`:undefined},
                 {label:"LI Clicks",           val:liTotalClicks>0?fmtNum(liTotalClicks):"—",icon:"🖱",  col:"#0a66c2"},
               ].map(k=>(
@@ -2716,6 +2734,24 @@ export default function App() {
 
           const STAGE_COLORS = { Won:'#16a34a', 'Lost (FA)':'#f59e0b', Lost:C.down, Active:'#7c3aed' };
 
+          // ── Owner map (hoisted to page scope so drilldown can access it) ────
+          const ownerMapGlobal = {};
+          b2bFiltered.forEach(r=>{
+            const o=r.owner||'Unknown';
+            if(!ownerMapGlobal[o]) ownerMapGlobal[o]={owner:o,total:0,won:0,lostFA:0,lost:0,active:0,wonValue:0,closeDays:[],biggestDeal:0,deals:[]};
+            ownerMapGlobal[o].total++;
+            ownerMapGlobal[o].deals.push(r);
+            ownerMapGlobal[o][r.stageClass==='closedWon'?'won':r.stageClass==='lostFA'?'lostFA':r.stageClass==='closedLost'?'lost':'active']++;
+            if(r.stageClass==='closedWon'){
+              ownerMapGlobal[o].wonValue+=r.amount;
+              if(r.amount>ownerMapGlobal[o].biggestDeal) ownerMapGlobal[o].biggestDeal=r.amount;
+              if(r.created&&r.closing){
+                const days=Math.round((new Date(r.closing)-new Date(r.created))/(86400000));
+                if(days>=0) ownerMapGlobal[o].closeDays.push(days);
+              }
+            }
+          });
+
           return (
           <div style={{display:'flex',flexDirection:'column',gap:16}}>
 
@@ -2883,26 +2919,7 @@ export default function App() {
 
               {/* ── Deal Owners ────────────────────────────────────────────── */}
               {(()=>{
-                // Build owner stats from b2bFiltered (date-filtered B2B deals)
-                const ownerMap={};
-                b2bFiltered.forEach(r=>{
-                  const o=r.owner||'Unknown';
-                  if(!ownerMap[o]) ownerMap[o]={owner:o,total:0,won:0,lostFA:0,lost:0,active:0,wonValue:0,
-                    closeDays:[],// days from created to closing for won deals
-                    biggestDeal:0,deals:[]};
-                  ownerMap[o].total++;
-                  ownerMap[o].deals.push(r);
-                  ownerMap[o][r.stageClass==='closedWon'?'won':r.stageClass==='lostFA'?'lostFA':r.stageClass==='closedLost'?'lost':'active']++;
-                  if(r.stageClass==='closedWon'){
-                    ownerMap[o].wonValue+=r.amount;
-                    if(r.amount>ownerMap[o].biggestDeal) ownerMap[o].biggestDeal=r.amount;
-                    // Avg close time: days from created to closing
-                    if(r.created&&r.closing){
-                      const days=Math.round((new Date(r.closing)-new Date(r.created))/(1000*60*60*24));
-                      if(days>=0) ownerMap[o].closeDays.push(days);
-                    }
-                  }
-                });
+                const ownerMap = ownerMapGlobal; // built at page scope
                 const ownerArr=Object.values(ownerMap).sort((a,b)=>b.total-a.total);
                 if(!ownerArr.length) return null;
 
@@ -2939,7 +2956,7 @@ export default function App() {
 
                   {/* Owner drilldown */}
                   {selectedOwner&&(()=>{
-                    const ow=ownerMap[selectedOwner];
+                    const ow=ownerMapGlobal[selectedOwner];
                     if(!ow) return null;
                     const avgClose=ow.closeDays.length?Math.round(ow.closeDays.reduce((a,b)=>a+b,0)/ow.closeDays.length):null;
                     const avgDeal=ow.won>0?Math.round(ow.wonValue/ow.won):0;
