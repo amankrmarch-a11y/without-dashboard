@@ -472,9 +472,9 @@ const isCrmB2B = r => /^B2B/i.test(r.type);
 
 function SectionHead({title,sub}){
   return(
-    <div style={{marginBottom:12,display:"flex",alignItems:"baseline",gap:10}}>
-      <div style={{fontSize:11,fontWeight:800,color:C.primary,textTransform:"uppercase",letterSpacing:1.8}}>{title}</div>
-      {sub&&<div style={{fontSize:10,color:C.muted}}>{sub}</div>}
+    <div style={{marginBottom:14,display:"flex",alignItems:"center",gap:10}}>
+      <div style={{fontSize:10.5,fontWeight:800,color:C.primary,textTransform:"uppercase",letterSpacing:2}}>{title}</div>
+      {sub&&<div style={{fontSize:10,color:C.muted,fontWeight:400}}>{sub}</div>}
     </div>
   );
 }
@@ -1056,7 +1056,14 @@ export default function App() {
         byMonth[yearMonth].clicks      += clickCol ? (parseFloat(String(r[clickCol]||'').replace(/,/g,''))||0) : 0;
         byMonth[yearMonth].leads       += leadCol  ? (parseFloat(String(r[leadCol]||'').replace(/,/g,''))||0) : 0;
       });
-      return Object.values(byMonth).sort((a,b)=>a.yearMonth.localeCompare(b.yearMonth));
+      const result = Object.values(byMonth).sort((a,b)=>a.yearMonth.localeCompare(b.yearMonth));
+      // Compute derived metrics per month
+      result.forEach(m => {
+        m.cpl = m.leads>0 ? Math.round(m.spend/m.leads) : 0;
+        m.ctr = m.impressions>0 ? parseFloat(((m.clicks/m.impressions)*100).toFixed(2)) : 0;
+        m.cpc = m.clicks>0 ? Math.round(m.spend/m.clicks) : 0;
+      });
+      return result;
     };
 
     try {
@@ -1339,7 +1346,13 @@ export default function App() {
   const bCPL=tLeads>0?Math.round(tSpend/tLeads):0;
   const bCTR=tImpr>0?parseFloat(((tClicks/tImpr)*100).toFixed(2)):0;
   const bCPC=tClicks>0?Math.round(tSpend/tClicks):0;
-  const allM=[...new Set([...md,...ld,...gd].map(r=>r.month))].sort((a,b)=>{ const mo=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]; return mo.indexOf(a)-mo.indexOf(b); });
+  // Use yearMonth ("2026-01") as the canonical key — preserves year context
+  const allM=[...new Set([...md,...ld,...gd].map(r=>r.yearMonth||r.month))].sort();
+  const ymLabel = ym => { // "2026-01" → "Jan 2026"
+    if(!ym||!ym.includes('-')) return ym;
+    const [y,mo]=ym.split('-'); const months=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    return `${months[parseInt(mo,10)-1]} ${y}`;
+  };
   const prevMonths=selMonths.length?selMonths.map(m=>prevMonth(m)).filter(Boolean):avail.slice(0,-1);
   const pInSel=m=>prevMonths.includes(m);
   const pmd=liveData.meta.filter(d=>pInSel(d.yearMonth||d.month));
@@ -1349,9 +1362,11 @@ export default function App() {
   const prevSpend=pAgg.spend; const prevLeads=pAgg.leads; const prevCPL=pAgg.leads>0?Math.round(pAgg.spend/pAgg.leads):0;
   const hasLive=liveData.meta.length>0||liveData.linkedin.length>0||liveData.google.length>0;
   const pieData=[{name:"Meta",value:mAgg.spend,color:C.meta},{name:"LinkedIn",value:lAgg.spend,color:C.li},{name:"Google",value:gAgg.spend,color:C.google}].filter(p=>p.value>0);
-  const barData=allM.map(m=>({month:m,Meta:md.find(d=>d.month===m)?.spend||0,LinkedIn:ld.find(d=>d.month===m)?.spend||0,Google:gd.find(d=>d.month===m)?.spend||0}));
-  const cplData=allM.map(m=>({month:m,Meta:md.find(d=>d.month===m)?.cpl||0,LinkedIn:ld.find(d=>d.month===m)?.cpl||0,Google:gd.find(d=>d.month===m)?.cpl||0}));
-  const ctrData=allM.map(m=>({month:m,Meta:md.find(d=>d.month===m)?.ctr||0,LinkedIn:ld.find(d=>d.month===m)?.ctr||0,Google:gd.find(d=>d.month===m)?.ctr||0}));
+
+  const findM = (arr,ym) => arr.find(d=>(d.yearMonth||d.month)===ym);
+  const cplData=allM.map(m=>({month:ymLabel(m),Meta:findM(md,m)?.cpl||0,LinkedIn:findM(ld,m)?.cpl||0,Google:findM(gd,m)?.cpl||0}));
+  const ctrData=allM.map(m=>({month:ymLabel(m),Meta:findM(md,m)?.ctr||0,LinkedIn:findM(ld,m)?.ctr||0,Google:findM(gd,m)?.ctr||0}));
+  const barData=allM.map(m=>({month:ymLabel(m),Meta:findM(md,m)?.spend||0,LinkedIn:findM(ld,m)?.spend||0,Google:findM(gd,m)?.spend||0}));
   const roasLabel = activeChan==="all"?"Blended ROAS":`${activeChan} ROAS`;
   const allCampaigns = [...(liveData.metaCamp||[]).map(c=>({...c,source:"Meta"})),...(liveData.linkedinCamp||[]).map(c=>({...c,source:"LinkedIn"})),...(liveData.googleCamp||[]).map(c=>({...c,source:"Google"}))].filter(c=>activeChan==="all"||c.source===activeChan).sort((a,b)=>b.spend-a.spend).slice(0,10);
   const chanEfficiency=[
@@ -1365,11 +1380,12 @@ export default function App() {
   const totalB2BRevenue = invInSel.filter(r=>/^B2B/i.test(r.businessType||r.type||"")).reduce((s,r)=>s+r.subtotal,0);
   const revenueROAS = totalB2BRevenue>0&&tSpend>0 ? parseFloat((totalB2BRevenue/tSpend).toFixed(2)) : 0;
   const hasRevROAS = totalB2BRevenue>0&&tSpend>0;
-  const allMonthsUnion=[...new Set([...allM,...invoiceData.map(r=>r.yearMonth||r.month).filter(m=>m&&m!=="—")])].filter(m=>inSel(m)).sort();
-  const monthlyRevSpend=allMonthsUnion.map(m=>({
-    month:m,
-    revenue:invoiceData.filter(r=>(r.yearMonth||r.month)===m).reduce((s,r)=>s+r.subtotal,0),
-    spend:(md.find(d=>d.month===m)||{spend:0}).spend+(ld.find(d=>d.month===m)||{spend:0}).spend+(gd.find(d=>d.month===m)||{spend:0}).spend,
+  const allMonthsUnion=[...new Set([...allM,...invoiceData.map(r=>r.yearMonth).filter(m=>m&&m!=="—")])].filter(m=>inSel(m)).sort();
+  const monthlyRevSpend=allMonthsUnion.map(ym=>({
+    month:ymLabel(ym),
+    yearMonth:ym,
+    revenue:invoiceData.filter(r=>r.yearMonth===ym).reduce((s,r)=>s+r.subtotal,0),
+    spend:(findM(md,ym)||{spend:0}).spend+(findM(ld,ym)||{spend:0}).spend+(findM(gd,ym)||{spend:0}).spend,
     roas:0,
   })).map(r=>({...r,roas:r.revenue>0&&r.spend>0?parseFloat((r.revenue/r.spend).toFixed(2)):0})).filter(r=>r.revenue>0||r.spend>0);
 
@@ -1389,18 +1405,25 @@ export default function App() {
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=DM+Mono:wght@400;500&display=swap');
         *{box-sizing:border-box;margin:0;padding:0;}
-        ::-webkit-scrollbar{width:5px;}::-webkit-scrollbar-track{background:${C.bg};}::-webkit-scrollbar-thumb{background:${C.border};border-radius:3px;}
-        .nb{transition:all .2s;}.nb:hover{background:${C.cardAlt}!important;}
+        ::-webkit-scrollbar{width:4px;}::-webkit-scrollbar-track{background:transparent;}::-webkit-scrollbar-thumb{background:${C.border};border-radius:4px;}
+        .nb{transition:all .18s;border-radius:8px!important;}.nb:hover{background:${C.cardAlt}!important;}
         .nb.on{background:${C.primary}!important;color:${C.primaryText}!important;}
         .fb{transition:all .15s;cursor:pointer;}.fb:hover{border-color:${C.primary}!important;color:${C.primary}!important;}
         .fb.on{background:${C.primary}!important;border-color:${C.primary}!important;color:#fff!important;font-weight:700!important;}
         .cb{transition:all .12s;cursor:pointer;}.cb:hover{border-color:${C.primary}60!important;}
         .cb.on{background:${C.primary}!important;border-color:${C.primary}!important;color:#fff!important;font-weight:700!important;}
-        .tr:hover{background:${C.cardAlt};}.del:hover{color:#ef4444!important;}.card-hover{transition:all .2s;}.card-hover:hover{transform:translateY(-2px);box-shadow:0 8px 24px rgba(45,45,78,0.12)!important;}
+        .tr{transition:background .12s;}.tr:hover{background:${C.cardAlt};}
+        .card-hover{transition:all .2s;}.card-hover:hover{transform:translateY(-2px);box-shadow:0 8px 24px rgba(45,45,78,0.12)!important;}
         .sub-btn{transition:all .18s;}.sub-btn:hover:not(:disabled){filter:brightness(1.06);transform:translateY(-1px);}.sub-btn:disabled{opacity:0.45;cursor:not-allowed;}
         @keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+        @keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
         .pill{border-radius:100px!important;}
         input[type=date]{color-scheme:${darkMode?'dark':'light'};}
+        table thead tr{background:${C.cardAlt};}
+        table thead th{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:${C.muted};padding:8px 12px;border-bottom:1px solid ${C.border};}
+        table tbody td{padding:9px 12px;font-size:11.5px;border-bottom:1px solid ${C.border};}
+        table tbody tr:last-child td{border-bottom:none;}
+        .section-card{background:${C.card};border:1px solid ${C.border};border-radius:16px;overflow:hidden;box-shadow:0 2px 12px rgba(45,45,78,0.06);}
       `}</style>
 
       {/* ── Top Navigation Bar ─────────────────────────────────────────────── */}
@@ -1437,7 +1460,7 @@ export default function App() {
         </div>
       </header>
 
-      <main style={{flex:1,overflowY:"auto",overflowX:"hidden",padding:"24px 28px 56px",minWidth:0}}>
+      <main style={{flex:1,overflowY:"auto",overflowX:"hidden",padding:"24px 28px 56px",minWidth:0,animation:"fadeIn .3s ease"}}>
 
         {/* ══ HOME ══════════════════════════════════════════════════════════ */}
         {page==="home"&&(()=>{
@@ -2388,51 +2411,55 @@ export default function App() {
                 );
               })()}
 
-              {/* ── Monthly Won Amount (from CRM Amount field) ────────────── */}
+              {/* ── Won Revenue KPI cards + monthly bar ───────────────────── */}
               {(()=>{
-                // Build monthly won amount from b2bWon deals — grouped by closing month
                 const wonByMonth = {};
                 b2bWon.forEach(d => {
-                  if(!d.closingMonth||!d.closingYear||!d.amount) return;
+                  if(!d.closingMonth||!d.closingYear) return;
                   const key = `${d.closingYear}-${String(MONTHS_ORDER.indexOf(d.closingMonth)+1).padStart(2,'0')}`;
                   if(!wonByMonth[key]) wonByMonth[key] = {label:`${d.closingMonth} ${d.closingYear}`, amount:0, count:0};
-                  wonByMonth[key].amount += d.amount;
+                  wonByMonth[key].amount += d.amount||0;
                   wonByMonth[key].count++;
                 });
-                const wonMonthArr = Object.keys(wonByMonth).sort().slice(-12).map(k=>wonByMonth[k]);
-                if(!wonMonthArr.length) return null;
+                const wonMonthArr = Object.keys(wonByMonth).sort().slice(-6).map(k=>wonByMonth[k]);
+                const totalWon = b2bWon.reduce((s,d)=>s+(d.amount||0),0);
+                const avgDeal  = b2bWon.length ? Math.round(totalWon/b2bWon.length) : 0;
+                const curMon   = wonMonthArr.length>=1 ? wonMonthArr[wonMonthArr.length-1] : null;
+                const prevMon  = wonMonthArr.length>=2 ? wonMonthArr[wonMonthArr.length-2] : null;
+                const momDelta = prevMon&&curMon&&prevMon.amount>0 ? parseFloat(((curMon.amount-prevMon.amount)/prevMon.amount*100).toFixed(1)) : null;
                 return(
-                <div>
-                  <SectionHead title="Monthly Won Revenue" sub="from CRM Amount field · Closed Won B2B deals"/>
-                  <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:12,padding:"18px",boxShadow:"0 1px 3px rgba(0,0,0,0.04)"}}>
-                    <ResponsiveContainer width="100%" height={220}>
-                      <BarChart data={wonMonthArr} barSize={18}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#efefef" vertical={false}/>
-                        <XAxis dataKey="label" tick={{fill:C.muted,fontSize:10}} axisLine={false} tickLine={false}/>
-                        <YAxis tickFormatter={v=>fmtINR(v)} tick={{fill:C.muted,fontSize:9}} axisLine={false} tickLine={false}/>
-                        <Tooltip formatter={(v,n,p)=>[fmtINR(v),`Won Revenue (${p.payload.count} deals)`]} contentStyle={{background:"#fff",border:`1px solid ${C.border}`,borderRadius:7,fontSize:11}}/>
-                        <Bar dataKey="amount" fill={C.accent} radius={[4,4,0,0]} name="Won Revenue"/>
+                <div style={{display:"flex",flexDirection:"column",gap:14}}>
+                  <SectionHead title="Won Revenue" sub="CRM Amount · Closed Won B2B · by closing month"/>
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(155px,1fr))",gap:10}}>
+                    {[
+                      {label:"Total Won Revenue", val:fmtINR(totalWon), primary:true},
+                      {label:"Closed Won Deals",  val:String(b2bWon.length), col:"#16a34a"},
+                      {label:"Avg Deal Size",      val:avgDeal>0?fmtINR(avgDeal):"—", col:C.sub},
+                      {label:curMon?curMon.label:"This Month", val:curMon?fmtINR(curMon.amount):"—",
+                        sub:momDelta!==null?`${momDelta>=0?"+":""}${momDelta}% vs prev month`:undefined,
+                        col:momDelta===null?C.muted:momDelta>=0?"#16a34a":C.down},
+                    ].map(k=>(
+                      <div key={k.label} style={{background:k.primary?C.accent:C.card,border:k.primary?"none":`1px solid ${C.border}`,borderRadius:14,padding:"16px 18px",boxShadow:k.primary?"0 4px 16px rgba(90,138,0,0.18)":"0 2px 8px rgba(45,45,78,0.06)"}}>
+                        <div style={{fontSize:9,color:k.primary?"rgba(255,255,255,0.65)":C.muted,textTransform:"uppercase",letterSpacing:1.2,fontWeight:700,marginBottom:6}}>{k.label}</div>
+                        <div style={{fontSize:24,fontWeight:800,color:k.primary?"#fff":k.col||C.text,fontFamily:"'DM Mono',monospace",letterSpacing:-0.5}}>{k.val}</div>
+                        {k.sub&&<div style={{fontSize:10,color:k.primary?"rgba(255,255,255,0.6)":k.col,marginTop:4,fontWeight:600}}>{k.sub}</div>}
+                      </div>
+                    ))}
+                  </div>
+                  {wonMonthArr.length>0&&(
+                  <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:14,padding:"18px 18px 12px",boxShadow:"0 2px 8px rgba(45,45,78,0.06)"}}>
+                    <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:14}}>Monthly Won Revenue <span style={{fontSize:10,color:C.muted,fontWeight:400}}>last 6 months</span></div>
+                    <ResponsiveContainer width="100%" height={200}>
+                      <BarChart data={wonMonthArr} barSize={24}>
+                        <CartesianGrid strokeDasharray="3 3" stroke={C.border} vertical={false}/>
+                        <XAxis dataKey="label" tick={{fill:C.muted,fontSize:11}} axisLine={false} tickLine={false}/>
+                        <YAxis tickFormatter={v=>fmtINR(v)} tick={{fill:C.muted,fontSize:9}} axisLine={false} tickLine={false} width={52}/>
+                        <Tooltip formatter={(v,n,p)=>[fmtINR(v),`${p.payload.count} deals won`]} contentStyle={{background:C.card,border:`1px solid ${C.border}`,borderRadius:8,fontSize:11,boxShadow:"0 4px 16px rgba(0,0,0,0.1)"}}/>
+                        <Bar dataKey="amount" fill={C.accent} radius={[5,5,0,0]} name="Won Revenue"/>
                       </BarChart>
                     </ResponsiveContainer>
-                    {/* Monthly table below chart */}
-                    <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,marginTop:12}}>
-                      <thead><tr style={{background:C.cardAlt}}>
-                        {["Month","Deals Won","Amount Won","Avg Deal Size"].map(h=>(
-                          <th key={h} style={{textAlign:"left",padding:"6px 10px",color:C.muted,fontWeight:700,fontSize:9,textTransform:"uppercase",letterSpacing:0.7}}>{h}</th>
-                        ))}
-                      </tr></thead>
-                      <tbody>
-                        {[...wonMonthArr].reverse().map(r=>(
-                          <tr key={r.label} className="tr" style={{borderTop:`1px solid ${C.border}`}}>
-                            <td style={{padding:"7px 10px",fontWeight:700,color:C.text}}>{r.label}</td>
-                            <td style={{padding:"7px 10px",color:C.sub}}>{r.count}</td>
-                            <td style={{padding:"7px 10px",fontFamily:"'DM Mono',monospace",fontWeight:700,color:C.accent}}>{fmtINR(r.amount)}</td>
-                            <td style={{padding:"7px 10px",fontFamily:"'DM Mono',monospace",color:C.sub}}>{fmtINR(Math.round(r.amount/r.count))}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
                   </div>
+                  )}
                 </div>
                 );
               })()}
@@ -2664,38 +2691,6 @@ export default function App() {
 
 
 
-              {/* All invoices list */}
-              <div>
-                <SectionHead title="All B2B Invoices" sub={`${allInv.length} total · deduplicated · Closed + Overdue`}/>
-                <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:16,overflow:"hidden",boxShadow:"0 2px 10px rgba(45,45,78,0.06)"}}>
-                  <div style={{overflowX:"auto"}}>
-                  <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:560}}>
-                    <thead>
-                      <tr style={{background:C.cardAlt}}>
-                        {["Invoice #","Date","Customer","Business Type","SubTotal","Balance","Status"].map(h=>(
-                          <th key={h} style={{textAlign:"left",padding:"7px 10px",color:C.muted,fontWeight:700,fontSize:9,textTransform:"uppercase",letterSpacing:0.7,whiteSpace:"nowrap"}}>{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {allInv.sort((a,b)=>b.subtotal-a.subtotal).map((inv,i)=>(
-                        <tr key={inv.invoiceNumber} className="tr" style={{borderTop:`1px solid ${C.border}`}}>
-                          <td style={{padding:"7px 10px",fontFamily:"'DM Mono',monospace",fontSize:10,color:C.accent,fontWeight:600}}>{inv.invoiceNumber}</td>
-                          <td style={{padding:"7px 10px",color:C.muted,fontSize:10}}>{inv.month}</td>
-                          <td style={{padding:"7px 10px",fontWeight:600,color:C.text,maxWidth:160,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{inv.customer}</td>
-                          <td style={{padding:"7px 10px"}}><span style={{fontSize:9.5,fontWeight:700,padding:"2px 6px",borderRadius:4,background:`${C.accent}12`,color:C.accent}}>{inv.businessType.replace("B2B ","")}</span></td>
-                          <td style={{padding:"7px 10px",fontFamily:"'DM Mono',monospace",fontWeight:700,color:C.text}}>{fmtINR(inv.subtotal)}</td>
-                          <td style={{padding:"7px 10px",fontFamily:"'DM Mono',monospace",color:inv.balance>0?C.down:C.muted}}>{inv.balance>0?fmtINR(inv.balance):"—"}</td>
-                          <td style={{padding:"7px 10px"}}>
-                            <span style={{fontSize:9.5,fontWeight:700,padding:"2px 7px",borderRadius:4,background:inv.status==="Overdue"?"#fef2f2":"#f0fdf4",color:inv.status==="Overdue"?C.down:"#16a34a"}}>{inv.status}</span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  </div>
-                </div>
-              </div>
             </>)}
           </div>
           );
