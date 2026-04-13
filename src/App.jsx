@@ -1068,10 +1068,14 @@ export default function App() {
     };
 
     try {
-      // ── ONE API call — ONE token refresh — all 5 sources ─────────────────
-      const resp = await fetch('/api/zoho?source=all');
-      const json = await resp.json();
-      if(!json.success) throw new Error(json.error || 'Sync failed');
+      // ── PHASE 1: Critical data — CRM + Invoices (shows up fast) ──────────
+      setZohoSyncStatus('⏳ Loading CRM & Invoices...');
+      const resp1 = await fetch('/api/zoho?source=critical');
+      const json1 = await resp1.json();
+      if(!json1.success) throw new Error(json1.error || 'Phase 1 failed');
+
+      // Parse CRM + Invoices immediately so user sees data
+      const json = json1; // reuse same parse logic below
 
       // ── Parse CRM ──────────────────────────────────────────────────────────
       if(json.crm?.data?.length) {
@@ -1128,6 +1132,22 @@ export default function App() {
         setInvoiceData(parsed2);
         results.push(`✅ Invoices: ${parsed2.length}`);
       } else results.push(`⚠️ Invoices: ${json.invoices?.count===0?'no data':'failed'}`);
+
+      // Update UI immediately with CRM + Invoices — user sees data before ads finish
+      setZohoSyncStatus(results.join(' · '));
+
+      // ── PHASE 2: Ads data (runs after CRM/Invoices are shown) ────────────
+      setZohoSyncStatus(prev => (prev||'') + ' · ⏳ Loading Ads...');
+      let adsJson = {meta:{data:[]},linkedin:{data:[]},google:{data:[]}};
+      try {
+        const resp2 = await fetch('/api/zoho?source=ads');
+        const j2 = await resp2.json();
+        if(j2.success) adsJson = j2;
+      } catch(e) { results.push('⚠️ Ads: network error'); }
+      // Remap to same structure
+      json.meta     = adsJson.meta;
+      json.linkedin = adsJson.linkedin;
+      json.google   = adsJson.google;
 
       // ── Parse Meta ─────────────────────────────────────────────────────────
       // Exact columns: Reporting Starts, Amount Spent ($=INR), Clicks (All), Impressions, Leads (Form)/Leads
