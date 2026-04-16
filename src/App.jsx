@@ -99,6 +99,14 @@ function toMonth(raw) {
   m=s.match(/^(\d{1,2})$/);                      if(m) return ML[m[1]]||null;
   return null;
 }
+function toDate(raw) {
+  if(!raw) return '';
+  const s=String(raw).trim();
+  let m;
+  m=s.match(/^(\d{2})\/(\d{2})\/(\d{4})/); if(m) return `${m[3]}-${m[2]}-${m[1]}`;
+  m=s.match(/^(\d{4})-(\d{2})-(\d{2})/);   if(m) return s.slice(0,10);
+  return '';
+}
 function toYearMonth(raw) {
   // Returns "YYYY-MM" or null
   if(!raw&&raw!==0) return null;
@@ -700,7 +708,7 @@ function exportToPDF(params) {
 }
 
 // ─── In-memory storage (localStorage not available in artifact sandbox) ─────────
-const EMPTY_LIVE = {meta:[],linkedin:[],google:[],metaCamp:[],liCamp:[],googleCamp:[]};
+const EMPTY_LIVE = {meta:[],linkedin:[],google:[],metaDaily:[],linkedinDaily:[],googleDaily:[],metaCamp:[],liCamp:[],googleCamp:[]};
 const EMPTY_INV = []; // flat array of deduplicated B2B invoices
 const EMPTY_CRM = []; // flat array of CRM deals
 // Safe localStorage wrapper — silently degrades if unavailable
@@ -783,7 +791,7 @@ function parseInvoiceFile(rows) {
     const subtotal = toNum(row[colSubtotal]);
     const balance  = toNum(row[colBalance]);
     const customer = String(row[colCustomer]||"").trim();
-    result.push({invoiceNumber:invNum, month, yearMonth, status, businessType:bizType, subtotal, balance, customer});
+    result.push({invoiceNumber:invNum, month, yearMonth, date:toDate(row[colDate])||'', status, businessType:bizType, subtotal, balance, customer});
   });
   return result;
 }
@@ -972,22 +980,28 @@ export default function App() {
   // ── Zoho Live Sync ─────────────────────────────────────────────────────────
   const[zohoSyncing,setZohoSyncing]=useState(false);
   const[zohoSyncStatus,setZohoSyncStatus]=useState(null); // null | 'success' | 'error'
-  const[zohoLastSync,setZohoLastSync]=useState(()=>lsGet("wo_last_sync",null));
+  const[zohoLastSync,setZohoLastSync]=useState(()=>{ const v=lsGet("wo_last_sync_ts",0); return v>0?v:null; });
   useEffect(()=>{ lsSave("wo_last_sync",zohoLastSync); },[zohoLastSync]);
 
   // ── Auto-sync on page load ─────────────────────────────────────────────────
   useEffect(()=>{
-    // Only auto-sync if we haven't synced in the last 30 minutes
+    // Sync once per calendar day — new day = fresh sync automatically
     const lastSyncTime = lsGet("wo_last_sync_ts", 0);
-    const twelveHours = 12 * 60 * 60 * 1000;
-    if(Date.now() - lastSyncTime > twelveHours) {
-      setTimeout(() => syncZoho(), 1500);
+    const lastSyncDate = lastSyncTime ? new Date(lastSyncTime).toDateString() : null;
+    const todayDate = new Date().toDateString();
+    const isNewDay = lastSyncDate !== todayDate;
+    // Also sync if more than 6 hours have passed (catches cases where opened multiple times same day after noon)
+    const sixHours = 6 * 60 * 60 * 1000;
+    const isStale = Date.now() - lastSyncTime > sixHours;
+    if(isNewDay || isStale) {
+      syncZoho();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[]);
 
   const syncZoho = async () => {
-    setZohoSyncing(true); setZohoSyncStatus(null);
+    // Non-blocking: don't show spinner — user sees cached data, updates flow in silently
+    setZohoSyncing(true);
     const results = [];
     const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
@@ -1021,7 +1035,7 @@ export default function App() {
       return null;
     };
     const parseAdsRows = (rows, spendCols, clickCols, impressionCols, leadCols, dateCols) => {
-      if(!rows.length) return [];
+      if(!rows.length) return {monthly:[], daily:[]};
       const sample = rows[0];
       const dateCol  = findCol(sample, ...dateCols);
       const spendCol = findCol(sample, ...spendCols);
@@ -1029,47 +1043,57 @@ export default function App() {
       const imprCol  = findCol(sample, ...impressionCols);
       const leadCol  = findCol(sample, ...leadCols);
 
-      // Strip ALL currency symbols — $, ₹, £, €, "INR ", "USD " — treat everything as INR
       const stripCurrency = v => {
         if(v===undefined||v===null||v==='') return 0;
         const clean = String(v)
-          .replace(/\bINR\b|\bUSD\b|\bEUR\b/gi, '')  // word-level currency codes
-          .replace(/[$₹£€]/g, '')                     // currency symbols
-          .replace(/%/g, '')                           // percent signs
-          .replace(/,/g, '')                           // commas
-          .trim();
+          .replace(/\bINR\b|\bUSD\b|\bEUR\b/gi, '')
+          .replace(/[$₹£€]/g, '').replace(/%/g, '').replace(/,/g, '').trim();
         return parseFloat(clean)||0;
       };
 
       const byMonth = {};
+      const byDay   = {};
       rows.forEach(r => {
         const dateRaw  = dateCol ? r[dateCol] : '';
         const normDate = parseDate(String(dateRaw||''));
-        const mi = normDate.length>=7 ? parseInt(normDate.slice(5,7),10)-1 : -1;
+        if(normDate.length<7) return;
+        const mi = parseInt(normDate.slice(5,7),10)-1;
         if(mi<0||mi>11) return;
-        const month = MONTHS[mi];
+        const month     = MONTHS[mi];
         const yearMonth = normDate.slice(0,7);
+        const date      = normDate.slice(0,10); // YYYY-MM-DD
+
+        const spend       = spendCol ? stripCurrency(r[spendCol]) : 0;
+        const impressions = imprCol  ? (parseFloat(String(r[imprCol]||'').replace(/,/g,''))||0) : 0;
+        const clicks      = clickCol ? (parseFloat(String(r[clickCol]||'').replace(/,/g,''))||0) : 0;
+        const leads       = leadCol  ? (parseFloat(String(r[leadCol]||'').replace(/,/g,''))||0) : 0;
+
+        // Monthly bucket
         if(!byMonth[yearMonth]) byMonth[yearMonth]={month,yearMonth,spend:0,impressions:0,clicks:0,leads:0,reach:0};
-        // Spend: strip all currency symbols, treat as INR
-        byMonth[yearMonth].spend       += spendCol ? stripCurrency(r[spendCol]) : 0;
-        // Other metrics: plain numbers only
-        byMonth[yearMonth].impressions += imprCol  ? (parseFloat(String(r[imprCol]||'').replace(/,/g,''))||0) : 0;
-        byMonth[yearMonth].clicks      += clickCol ? (parseFloat(String(r[clickCol]||'').replace(/,/g,''))||0) : 0;
-        byMonth[yearMonth].leads       += leadCol  ? (parseFloat(String(r[leadCol]||'').replace(/,/g,''))||0) : 0;
+        byMonth[yearMonth].spend+=spend; byMonth[yearMonth].impressions+=impressions;
+        byMonth[yearMonth].clicks+=clicks; byMonth[yearMonth].leads+=leads;
+
+        // Daily bucket (YYYY-MM-DD) — preserves exact spend per day
+        if(date.length===10) {
+          if(!byDay[date]) byDay[date]={date,month,yearMonth,spend:0,impressions:0,clicks:0,leads:0};
+          byDay[date].spend+=spend; byDay[date].impressions+=impressions;
+          byDay[date].clicks+=clicks; byDay[date].leads+=leads;
+        }
       });
-      const result = Object.values(byMonth).sort((a,b)=>a.yearMonth.localeCompare(b.yearMonth));
-      // Compute derived metrics per month
-      result.forEach(m => {
+
+      const monthly = Object.values(byMonth).sort((a,b)=>a.yearMonth.localeCompare(b.yearMonth));
+      monthly.forEach(m => {
         m.cpl = m.leads>0 ? Math.round(m.spend/m.leads) : 0;
         m.ctr = m.impressions>0 ? parseFloat(((m.clicks/m.impressions)*100).toFixed(2)) : 0;
         m.cpc = m.clicks>0 ? Math.round(m.spend/m.clicks) : 0;
       });
-      return result;
+      const daily = Object.values(byDay).sort((a,b)=>a.date.localeCompare(b.date));
+      return {monthly, daily};
     };
 
     try {
       // ── PHASE 1: Critical data — CRM + Invoices (shows up fast) ──────────
-      setZohoSyncStatus('⏳ Loading CRM & Invoices...');
+      // No loading message — sync is silent
       const resp1 = await fetch('/api/zoho?source=critical');
       const json1 = await resp1.json();
       if(!json1.success) throw new Error(json1.error || 'Phase 1 failed');
@@ -1127,17 +1151,16 @@ export default function App() {
           const yearMonth = normDate.slice(0,7)||'—';
           let month='—';
           if(normDate.length>=7){const mi=parseInt(normDate.slice(5,7),10)-1; if(mi>=0&&mi<=11) month=MONTHS[mi];}
-          return {invoiceNumber:invNum,month,yearMonth,status,businessType:bizType,subtotal,balance,customer};
+          return {invoiceNumber:invNum,month,yearMonth,date:normDate||'',status,businessType:bizType,subtotal,balance,customer};
         }).filter(Boolean);
         setInvoiceData(parsed2);
         results.push(`✅ Invoices: ${parsed2.length}`);
       } else results.push(`⚠️ Invoices: ${json.invoices?.count===0?'no data':'failed'}`);
 
-      // Update UI immediately with CRM + Invoices — user sees data before ads finish
-      setZohoSyncStatus(results.join(' · '));
+      // Data already in state — ads fetch continues silently below
 
       // ── PHASE 2: Ads data (runs after CRM/Invoices are shown) ────────────
-      setZohoSyncStatus(prev => (prev||'') + ' · ⏳ Loading Ads...');
+      // Phase 2 ads — silent
       let adsJson = {meta:{data:[]},linkedin:{data:[]},google:{data:[]}};
       try {
         const resp2 = await fetch('/api/zoho?source=ads');
@@ -1152,47 +1175,49 @@ export default function App() {
       // ── Parse Meta ─────────────────────────────────────────────────────────
       // Exact columns: Reporting Starts, Amount Spent ($=INR), Clicks (All), Impressions, Leads (Form)/Leads
       if(json.meta?.data?.length) {
-        const monthly = parseAdsRows(json.meta.data,
-          ['Amount Spent'],                                    // spend: $45.66 = INR
-          ['Clicks (All)', 'Link Clicks', 'Clicks'],           // clicks: plain number
-          ['Impressions'],                                     // impressions: plain number
-          ['Leads (Form)', 'Leads', 'Results'],                // leads: plain number
+        const metaResult = parseAdsRows(json.meta.data,
+          ['Amount Spent'],['Clicks (All)', 'Link Clicks', 'Clicks'],
+          ['Impressions'],['Leads (Form)', 'Leads', 'Results'],
           ['Reporting Starts', 'Reporting Ends', 'Date']);
-        if(monthly.length>0){ setLive(prev=>({...prev,meta:monthly})); results.push(`✅ Meta: ${monthly.length} months · ₹${monthly.reduce((s,r)=>s+r.spend,0).toLocaleString('en-IN')}`); }
-        else results.push(`⚠️ Meta: 0 months — check columns`);
+        if(metaResult.monthly.length>0){
+          setLive(prev=>({...prev,meta:metaResult.monthly,metaDaily:metaResult.daily}));
+          results.push(`✅ Meta: ${metaResult.daily.length} days · ₹${metaResult.monthly.reduce((s,r)=>s+r.spend,0).toLocaleString('en-IN')}`);
+        } else results.push(`⚠️ Meta: 0 months — check columns`);
       } else results.push(`⚠️ Meta: no data`);
 
       // ── Parse LinkedIn ─────────────────────────────────────────────────────
       // Exact columns: Date, Cost In Local Currency (INR 1141.94), Clicks, Impressions, One Click Leads
       if(json.linkedin?.data?.length) {
-        const monthly = parseAdsRows(json.linkedin.data,
-          ['Cost In Local Currency', 'Cost In Usd', 'Total Spent'], // spend: "INR 1,141.94"
-          ['Clicks', 'Card Clicks', 'Action Clicks'],                 // clicks: plain number
-          ['Impressions', 'Card Impressions'],                        // impressions: plain number
+        const liResult = parseAdsRows(json.linkedin.data,
+          ['Cost In Local Currency', 'Cost In Usd', 'Total Spent'],
+          ['Clicks', 'Card Clicks', 'Action Clicks'],
+          ['Impressions', 'Card Impressions'],
           ['One Click Leads', 'Leads', 'External Website Conversions'],
           ['Date']);
-        if(monthly.length>0){ setLive(prev=>({...prev,linkedin:monthly})); results.push(`✅ LinkedIn: ${monthly.length} months · ₹${monthly.reduce((s,r)=>s+r.spend,0).toLocaleString('en-IN')}`); }
-        else results.push(`⚠️ LinkedIn: 0 months — check columns`);
+        if(liResult.monthly.length>0){
+          setLive(prev=>({...prev,linkedin:liResult.monthly,linkedinDaily:liResult.daily}));
+          results.push(`✅ LinkedIn: ${liResult.daily.length} days · ₹${liResult.monthly.reduce((s,r)=>s+r.spend,0).toLocaleString('en-IN')}`);
+        } else results.push(`⚠️ LinkedIn: 0 months — check columns`);
       } else results.push(`⚠️ LinkedIn: no data`);
 
       // ── Parse Google ───────────────────────────────────────────────────────
       // Exact columns: Day (YYYY-MM-DD), Costs ($=INR), Clicks, Impressions, Conversions
       if(json.google?.data?.length) {
-        const monthly = parseAdsRows(json.google.data,
-          ['Costs'],                                           // spend: $225.49 = INR
-          ['Clicks', 'Interactions'],                         // clicks: plain number
-          ['Impressions'],                                     // impressions: plain number
-          ['Conversions', 'All Conversions'],                  // leads: plain decimal
+        const gResult = parseAdsRows(json.google.data,
+          ['Costs'],['Clicks', 'Interactions'],
+          ['Impressions'],['Conversions', 'All Conversions'],
           ['Day']);
-        if(monthly.length>0){ setLive(prev=>({...prev,google:monthly})); results.push(`✅ Google: ${monthly.length} months · ₹${monthly.reduce((s,r)=>s+r.spend,0).toLocaleString('en-IN')}`); }
-        else results.push(`⚠️ Google: 0 months — check columns`);
+        if(gResult.monthly.length>0){
+          setLive(prev=>({...prev,google:gResult.monthly,googleDaily:gResult.daily}));
+          results.push(`✅ Google: ${gResult.daily.length} days · ₹${gResult.monthly.reduce((s,r)=>s+r.spend,0).toLocaleString('en-IN')}`);
+        } else results.push(`⚠️ Google: 0 months — check columns`);
       } else results.push(`⚠️ Google: no data`);
 
       // ── Parse Instagram (from Zoho Analytics) ────────────────────────────
       // Instagram view IDs — update these with real IDs from list_views
       // For now, parse from the data if available in json
 
-      setZohoLastSync(new Date().toLocaleString('en-IN'));
+      setZohoLastSync(Date.now()); // store timestamp, display as relative
       lsSave("wo_last_sync_ts", Date.now());
       setZohoSyncStatus(results.join(' · '));
     } catch(err) {
@@ -1361,13 +1386,35 @@ export default function App() {
   },[adsFromDate,adsToDate,avail]);
 
   const inSel=m=>selMonths.length===0||selMonths.includes(m);
+  // Note: ad spend data is aggregated monthly — a Jan 1–10 filter shows all of Jan
+  const adsFilterIsSubMonth = adsFromDate&&adsToDate&&
+    adsFromDate.slice(0,7)===adsToDate.slice(0,7)&&
+    !(adsFromDate.endsWith('-01')&&(adsToDate.endsWith('-31')||adsToDate.endsWith('-30')||adsToDate.endsWith('-28')||adsToDate.endsWith('-29')));
   const prevMonth=m=>{ if(!m) return null; const [y,mo]=m.split('-').map(Number); const pm=mo===1?12:mo-1; const py=mo===1?y-1:y; return `${py}-${String(pm).padStart(2,'0')}`; };
 
   const md=enrichedMeta.filter(d=>inSel(d.yearMonth||d.month));
   const ld=enrichedLinkedIn.filter(d=>inSel(d.yearMonth||d.month));
   const gd=enrichedGoogle.filter(d=>inSel(d.yearMonth||d.month));
   const agg=arr=>arr.reduce((a,r)=>({spend:a.spend+r.spend,leads:a.leads+r.leads,clicks:a.clicks+r.clicks,impressions:a.impressions+r.impressions,reach:a.reach+(r.reach||0)}),{spend:0,leads:0,clicks:0,impressions:0,reach:0});
-  const mAgg=agg(md); const lAgg=agg(ld); const gAgg=agg(gd);
+
+  // ── Use DAILY rows when an exact date range is set (fixes sub-month accuracy) ──
+  const hasExactRange = !!(adsFromDate && adsToDate);
+  const inDateRange = d => {
+    if(!hasExactRange) return true;
+    const date = d.date || (d.yearMonth ? d.yearMonth+'-01' : '');
+    if(!date) return false;
+    if(date < adsFromDate) return false;
+    if(date > adsToDate)   return false;
+    return true;
+  };
+  const mdDaily = (liveData.metaDaily||[]).filter(inDateRange);
+  const ldDaily = (liveData.linkedinDaily||[]).filter(inDateRange);
+  const gdDaily = (liveData.googleDaily||[]).filter(inDateRange);
+  // If we have daily data for this range, use it; else fall back to monthly
+  const hasDailyData = mdDaily.length>0||ldDaily.length>0||gdDaily.length>0;
+  const mAgg = hasDailyData ? agg(mdDaily) : agg(md);
+  const lAgg = hasDailyData ? agg(ldDaily) : agg(ld);
+  const gAgg = hasDailyData ? agg(gdDaily) : agg(gd);
   // Channel-aware totals — respect activeChan filter
   const chanAgg = activeChan==="all"
     ? agg([...md,...ld,...gd])
@@ -1416,7 +1463,15 @@ export default function App() {
   ].filter(Boolean).sort((a,b)=>a.cpl&&b.cpl?a.cpl-b.cpl:a.cpl?-1:1);
 
   // ── Invoice aggregates ────────────────────────────────────────────────────
-  const invInSel = invoiceData.filter(r=>selMonths.length===0||selMonths.includes(r.yearMonth||r.month));
+  const invInSel = invoiceData.filter(r=>{
+    if(!adsFromDate&&!adsToDate) return true;
+    const d = r.date || (r.yearMonth ? r.yearMonth+'-01' : '');
+    if(!d) return true;
+    // Full date comparison — Jan 1–10 shows only Jan 1–10, not all of Jan
+    if(adsFromDate && d < adsFromDate) return false;
+    if(adsToDate   && d > adsToDate)   return false;
+    return true;
+  });
   const totalB2BRevenue = invInSel.filter(r=>/^B2B/i.test(r.businessType||r.type||"")).reduce((s,r)=>s+r.subtotal,0);
   const revenueROAS = totalB2BRevenue>0&&tSpend>0 ? parseFloat((totalB2BRevenue/tSpend).toFixed(2)) : 0;
   const hasRevROAS = totalB2BRevenue>0&&tSpend>0;
@@ -1434,7 +1489,7 @@ export default function App() {
   const monthlyRevSpend=allMonthsUnion.map(ym=>({
     month:ymLabel(ym),
     yearMonth:ym,
-    revenue:invoiceData.filter(r=>r.yearMonth===ym&&/^B2B/i.test(r.businessType||r.type||"")).reduce((s,r)=>s+r.subtotal,0),
+    revenue:invoiceData.filter(r=>(r.date?r.date.slice(0,7):r.yearMonth)===ym&&/^B2B/i.test(r.businessType||r.type||"")).reduce((s,r)=>s+r.subtotal,0),
     spend:chanSpendForMonth(ym),
     roas:0,
   })).map(r=>({...r,roas:r.revenue>0&&r.spend>0?parseFloat((r.revenue/r.spend).toFixed(2)):0})).filter(r=>r.revenue>0||r.spend>0);
@@ -1537,13 +1592,13 @@ export default function App() {
           const b2bRevHome = invoiceData
             .filter(r => isB2BInv(r.businessType||r.type||""))
             .filter(r => ["Closed","Overdue"].includes(r.status))
-            .filter(r => inOvRange(r.yearMonth ? r.yearMonth+"-01" : null))
+            .filter(r => inOvRange(r.date || (r.yearMonth ? r.yearMonth+"-01" : null)))
             .reduce((s,r) => s+r.subtotal, 0);
 
           const d2cRevHome = invoiceData
             .filter(r => isD2CInv(r.businessType||r.type||""))
             .filter(r => ["Closed","Overdue"].includes(r.status))
-            .filter(r => inOvRange(r.yearMonth ? r.yearMonth+"-01" : null))
+            .filter(r => inOvRange(r.date || (r.yearMonth ? r.yearMonth+"-01" : null)))
             .reduce((s,r) => s+r.subtotal, 0);
 
           // ── CRM filtered by overview date (closing date) ──────────────────────
@@ -1596,16 +1651,20 @@ export default function App() {
                   )}
                 </div>
                 {/* Last sync timestamp only */}
-                {zohoLastSync&&<span style={{fontSize:10,color:C.muted}}>Last sync: {zohoLastSync}</span>}
+                {zohoLastSync&&(()=>{
+                  const diff = Math.round((Date.now()-zohoLastSync)/60000);
+                  const label = diff<1?'just now':diff<60?`${diff}m ago`:`${Math.floor(diff/60)}h ago`;
+                  return <span style={{fontSize:10,color:C.muted}}>Synced {label}</span>;
+                })()}
                 {/* Status dot */}
                 <div style={{width:6,height:6,borderRadius:"50%",background:hasLive||invoiceData.length||crmData.length?"#22c55e":"#f59e0b"}}/>
                 {/* Sync button — pushed to far right */}
-                <button onClick={syncZoho} disabled={zohoSyncing}
-                  style={{background:zohoSyncing?"rgba(45,45,78,0.1)":C.primary,color:zohoSyncing?C.muted:"#fff",
-                    border:"none",borderRadius:8,padding:"6px 14px",fontSize:11,fontWeight:700,cursor:zohoSyncing?"not-allowed":"pointer",
-                    display:"flex",alignItems:"center",gap:5,transition:"all .2s"}}>
+                <button onClick={()=>{ if(!zohoSyncing) syncZoho(); }}
+                  style={{background:C.primary,color:"#fff",border:"none",borderRadius:8,padding:"6px 14px",
+                    fontSize:11,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",gap:5,
+                    opacity:zohoSyncing?0.7:1,transition:"opacity .2s"}}>
                   {zohoSyncing
-                    ? <><span style={{display:"inline-block",animation:"spin 1s linear infinite"}}>⟳</span> Syncing...</>
+                    ? <><span style={{display:"inline-block",animation:"spin 1s linear infinite",fontSize:10}}>⟳</span> Updating</>
                     : <><span>⚡</span> Sync Now</>}
                 </button>
               </div>
@@ -1658,7 +1717,14 @@ export default function App() {
         })()}
 
         {/* ══ ADS ═══════════════════════════════════════════════════════════ */}
-        {page==="ads"&&(
+        {page==="ads"&&(()=>{
+          const allDaily=[...(liveData.metaDaily||[]),...(liveData.linkedinDaily||[]),...(liveData.googleDaily||[])];
+          const dailyDates=allDaily.map(d=>d.date).filter(Boolean).sort();
+          const dataFrom=dailyDates[0]||''; const dataTo=dailyDates[dailyDates.length-1]||'';
+          const fmtD=d=>d?d.slice(8)+'/'+d.slice(5,7)+'/'+d.slice(0,4):'';
+          const today=new Date().toISOString().slice(0,10);
+          const daysLag=dataTo?Math.round((new Date(today)-new Date(dataTo))/(86400000)):0;
+          return(
           <div style={{display:"flex",flexDirection:"column",gap:16,maxWidth:"100%"}}>
 
             {/* Header */}
@@ -1666,6 +1732,11 @@ export default function App() {
               <div>
                 <div style={{fontSize:10,color:C.muted,textTransform:"uppercase",letterSpacing:2,fontWeight:700,marginBottom:2}}>Without® · Paid Media</div>
                 <h1 style={{fontSize:20,fontWeight:800,color:C.text,letterSpacing:-0.5}}>Ad Spend</h1>
+                {dataTo&&<div style={{display:"flex",alignItems:"center",gap:6,marginTop:4}}>
+                  <span style={{fontSize:10.5,color:C.muted}}>Data in Zoho: <b style={{color:C.text}}>{fmtD(dataFrom)}</b> to <b style={{color:C.text}}>{fmtD(dataTo)}</b></span>
+                  {daysLag>1&&<span style={{background:"#fef3c7",color:"#92400e",fontSize:9.5,fontWeight:700,padding:"2px 7px",borderRadius:4}}>⚠️ {daysLag}d lag</span>}
+                  {daysLag<=1&&<span style={{background:"#f0fdf4",color:"#16a34a",fontSize:9.5,fontWeight:700,padding:"2px 7px",borderRadius:4}}>✓ Up to date</span>}
+                </div>}
               </div>
               <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
                 <DatePill from={adsFromDate} setFrom={setAdsFromDate} to={adsToDate} setTo={setAdsToDate}/>
@@ -1718,6 +1789,11 @@ export default function App() {
             {hasLive&&(<>
 
               {/* ── Filter bar ─────────────────────────────────────────────── */}
+              {adsFilterIsSubMonth&&(
+                <div style={{background:"#fffbeb",border:"1px solid #fde68a",borderRadius:10,padding:"8px 14px",fontSize:11,color:"#92400e"}}>
+                  ⚠️ Ad spend data is stored monthly — showing all of {ymLabel(selMonths[0]||'')} (daily breakdown not available from Zoho Analytics)
+                </div>
+              )}
               <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:14,padding:"12px 16px",display:"flex",flexDirection:"column",gap:8,boxShadow:"0 1px 3px rgba(0,0,0,0.04)"}}>
                 <div style={{display:"flex",flexWrap:"wrap",gap:10,alignItems:"center"}}>
                   <span style={{fontSize:10,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>Channel</span>
@@ -1742,7 +1818,9 @@ export default function App() {
 
               {/* ── KPI Grid ───────────────────────────────────────────────── */}
               <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:8}}>
-                <KPI label="Total Spend"  value={fmtINR(tSpend)} icon="💸" green curr={tSpend} prev={prevSpend}/>
+                <KPI label="Total Spend"  value={fmtINR(tSpend)}
+                  sub={selMonths.length>0?`${selMonths.map(m=>{const[y,mo]=m.split('-');const months=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];return months[parseInt(mo,10)-1];}).join(', ')}`:undefined}
+                  icon="💸" green curr={tSpend} prev={prevSpend}/>
                 {(activeChan==="all"||activeChan==="Meta")&&liveData.meta.length>0&&
                   <KPI label="Meta" value={fmtINR(mAgg.spend)} icon="Ⓜ" color={C.meta} curr={mAgg.spend} prev={pmd.reduce((s,r)=>s+r.spend,0)}/>}
                 {(activeChan==="all"||activeChan==="LinkedIn")&&liveData.linkedin.length>0&&
@@ -2036,7 +2114,8 @@ export default function App() {
 
             </>)}
           </div>
-        )}
+          );
+        })()}
 
         {/* ══ HISTORY ═══════════════════════════════════════════════════════ */}
         {page==="history"&&(
@@ -2641,13 +2720,11 @@ export default function App() {
           // Year-aware invoice filter — compare YYYY-MM strings directly
           const allInv = invoiceData.filter(r=>{
             if(!invFromDate&&!invToDate) return true;
-            const ym = r.yearMonth || r.month;
-            if(!ym) return true;
-            // Convert date inputs to YYYY-MM
-            const from = invFromDate ? invFromDate.slice(0,7) : null;
-            const to   = invToDate   ? invToDate.slice(0,7)   : null;
-            if(from && ym < from) return false;
-            if(to   && ym > to)   return false;
+            // Use exact date if available, fall back to yearMonth for backward compat
+            const d = r.date || (r.yearMonth ? r.yearMonth+'-01' : '');
+            if(!d) return true;
+            if(invFromDate && d < invFromDate) return false;
+            if(invToDate   && d > invToDate)   return false;
             return true;
           });
           const totalRev   = allInv.reduce((s,r)=>s+r.subtotal,0);
