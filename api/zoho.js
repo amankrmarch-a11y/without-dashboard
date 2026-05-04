@@ -43,11 +43,8 @@ function parseLine(line) {
   return result;
 }
 
-// ── Two workspaces ────────────────────────────────────────────────────────────
-// YOUR workspace  → Zoho Books (invoices) — syncs in real time
-// ANISH workspace → CRM, Meta, LinkedIn, Google — syncs daily
-const WS_MINE  = '172632000001964001'; // your workspace
-const WS_ANISH = '172632000001878083'; // Anish's workspace
+// ── Single workspace — Anish's (everything syncs daily here) ─────────────────
+const WS_ANISH = '172632000001878083'; // Anish's workspace — all data lives here
 
 async function fetchView(token, viewId, workspaceId, orgId) {
   const url = `https://analyticsapi.zoho.in/restapi/v2/workspaces/${workspaceId}/views/${viewId}/data`;
@@ -61,13 +58,13 @@ async function fetchView(token, viewId, workspaceId, orgId) {
   try { return JSON.parse(text); } catch { return csvToJson(text); }
 }
 
-// ── View IDs + which workspace each lives in ──────────────────────────────────
+// ── View IDs — all from Anish's workspace ─────────────────────────────────────
 const VIEWS = {
-  crm:      { id: '172632000001964013', ws: WS_ANISH }, // Anish's CRM
-  invoices: { id: '172632000001967250', ws: WS_MINE  }, // your Zoho Books
-  meta:     { id: '172632000001964071', ws: WS_ANISH }, // Anish's Meta Ads
-  linkedin: { id: '172632000001964086', ws: WS_ANISH }, // Anish's LinkedIn Ads
-  google:   { id: '172632000001964061', ws: WS_ANISH }, // Anish's Google Ads
+  crm:      { id: '172632000001964013', ws: WS_ANISH }, // Deals (Zoho CRM)
+  invoices: { id: '172632000001967250', ws: WS_ANISH }, // Invoices (Zoho Books)
+  meta:     { id: '172632000001964071', ws: WS_ANISH }, // Campaign Insights (Facebook Ads)
+  linkedin: { id: '172632000001964086', ws: WS_ANISH }, // Campaigns Performance (LinkedIn Ads)
+  google:   { id: '172632000001964061', ws: WS_ANISH }, // Campaign Performance (Google Ads)
 };
 
 // Helper — fetch using the view's own workspace
@@ -147,15 +144,14 @@ export default async function handler(req, res) {
 
     // ── List views (debug helper) ─────────────────────────────────────────────
     if (source === 'list_views') {
-      const ws = req.query.ws === 'anish' ? WS_ANISH : WS_MINE;
       const r = await fetch(
-        `https://analyticsapi.zoho.in/restapi/v2/workspaces/${ws}/views`,
+        `https://analyticsapi.zoho.in/restapi/v2/workspaces/${WS_ANISH}/views`,
         { headers: { 'Authorization': `Zoho-oauthtoken ${token}`, 'ZANALYTICS-ORGID': ORG } }
       );
       const d = await r.json();
       return res.json({
         success: true,
-        workspace: ws === WS_ANISH ? 'anish' : 'mine',
+        workspace: 'anish',
         views: d.data?.views?.map(v => ({ id: v.viewId, name: v.viewName })) || []
       });
     }
