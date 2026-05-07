@@ -1141,9 +1141,11 @@ export default function App() {
           const statusRaw = (inv['Invoice Status']||inv['Status']||'').toLowerCase().trim();
           const status = statusRaw==='closed'?'Closed':statusRaw==='overdue'?'Overdue':null;
           if(!status) return null;
-          // B2B = starts with "B2B" | D2C = D2C Shopify, D2C Amazon, B2C Special Order, or empty
-          const bizType = (inv['CF.Business Type']||inv['Business Type']||inv['business type']||'D2C').trim();
-          if(/^grant/i.test(bizType)) return null;
+          // B2B = CF.Business Type starts with "B2B" (B2B Bottles, B2B Eyewear, B2B Corporate Gifting etc.)
+          // D2C = starts with "D2C" (D2C Shopify) or "B2C" (B2C Offline Special Orders)
+          // Exclude = Grants or empty
+          const bizType = (inv['CF.Business Type']||inv['Business Type']||inv['business type']||'').trim();
+          if(!bizType || /^grant/i.test(bizType)) return null;
           const subtotal = parseAmt(inv['Sub Total (BCY)']||inv['SubTotal']||'0');
           const balance  = parseAmt(inv['Balance (BCY)']||inv['Balance']||'0');
           const customer = inv['Customer ID']||'';
@@ -1587,9 +1589,9 @@ export default function App() {
 
           // ── Invoice revenue filtered by overview date ─────────────────────────
           // B2B ROAS = B2B Invoice Revenue (Closed+Overdue, type starts "B2B") / Total Ad Spend
+          // B2B = starts with B2B | D2C = starts with D2C or B2C | empty/grants excluded at parse time
+          const isD2CInv = bt => /^D2C/i.test(bt||"") || /^B2C/i.test(bt||"");
           const isB2BInv = bt => /^B2B/i.test(bt||"");
-          // D2C: D2C Shopify, D2C Amazon (start with D2C) OR B2C Special Order
-          const isD2CInv = bt => (/^D2C/i.test(bt||"") || /^B2C\s*Special/i.test(bt||"")) && !/^B2B/i.test(bt||"");
 
           const b2bRevHome = invoiceData
             .filter(r => isB2BInv(r.businessType||r.type||""))
@@ -2730,8 +2732,8 @@ export default function App() {
             return true;
           });
           const totalRev   = allInv.reduce((s,r)=>s+r.subtotal,0);
-          const b2bInv     = allInv.filter(r=>/^B2B/i.test(r.businessType));
-          const d2cInv     = allInv.filter(r=>/^D2C/i.test(r.businessType||'') || /^B2C\s*Special/i.test(r.businessType||''));
+          const b2bInv     = allInv.filter(r=>/^B2B/i.test(r.businessType||''));
+          const d2cInv     = allInv.filter(r=>/^D2C/i.test(r.businessType||'') || /^B2C/i.test(r.businessType||''));
           const b2bRev     = b2bInv.reduce((s,r)=>s+r.subtotal,0);
           const d2cRev     = d2cInv.reduce((s,r)=>s+r.subtotal,0);
           const closedRev  = allInv.filter(r=>r.status==="Closed").reduce((s,r)=>s+r.subtotal,0);
