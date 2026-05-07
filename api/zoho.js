@@ -22,25 +22,39 @@ async function getToken() {
 }
 
 function csvToJson(csv) {
-  const lines = csv.split('\n').filter(l => l.trim());
-  if (lines.length < 2) return [];
-  const headers = parseLine(lines[0]);
-  return lines.slice(1).map(line => {
-    const vals = parseLine(line);
+  const lines = csv.split('\n');
+  const result = [];
+  let headers = null;
+
+  for (const rawLine of lines) {
+    if (!rawLine.trim()) continue;
+    const fields = parseCSVLine(rawLine);
+    if (!headers) { headers = fields.map(h => h.trim()); continue; }
+    if (fields.length < headers.length / 2) continue; // skip badly malformed rows
     const obj = {};
-    headers.forEach((h, i) => { obj[h.trim()] = (vals[i] || '').trim(); });
-    return obj;
-  }).filter(r => Object.values(r).some(v => v));
-}
-function parseLine(line) {
-  const result = []; let cur = ''; let inQ = false;
-  for (const ch of line) {
-    if (ch === '"') { inQ = !inQ; }
-    else if (ch === ',' && !inQ) { result.push(cur); cur = ''; }
-    else { cur += ch; }
+    headers.forEach((h, i) => { obj[h] = (fields[i] || '').trim(); });
+    if (Object.values(obj).some(v => v)) result.push(obj);
   }
-  result.push(cur);
   return result;
+}
+
+function parseCSVLine(line) {
+  const fields = [];
+  let cur = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (inQuotes && line[i+1] === '"') { cur += '"'; i++; } // escaped quote
+      else inQuotes = !inQuotes;
+    } else if (ch === ',' && !inQuotes) {
+      fields.push(cur); cur = '';
+    } else {
+      cur += ch;
+    }
+  }
+  fields.push(cur);
+  return fields;
 }
 
 // ── Single workspace — everything on Anish's (syncs daily) ───────────────────
@@ -51,8 +65,7 @@ async function fetchView(token, viewId, workspaceId, orgId) {
   const r = await fetch(url, {
     headers: {
       'Authorization': `Zoho-oauthtoken ${token}`,
-      'ZANALYTICS-ORGID': orgId,
-      'ZANALYTICS-OUTPUTFORMAT': 'json'
+      'ZANALYTICS-ORGID': orgId
     }
   });
   const text = await r.text();
