@@ -43,8 +43,9 @@ function parseLine(line) {
   return result;
 }
 
-// ── Single workspace — Anish's (everything syncs daily here) ─────────────────
-const WS_ANISH = '172632000001878083'; // Anish's workspace — all data lives here
+// ── Two workspaces ────────────────────────────────────────────────────────────
+const WS_MINE  = '172632000001964001'; // your workspace — Zoho Books invoices
+const WS_ANISH = '172632000001878083'; // Anish's workspace — CRM + all Ads
 
 async function fetchView(token, viewId, workspaceId, orgId) {
   const url = `https://analyticsapi.zoho.in/restapi/v2/workspaces/${workspaceId}/views/${viewId}/data`;
@@ -58,13 +59,13 @@ async function fetchView(token, viewId, workspaceId, orgId) {
   try { return JSON.parse(text); } catch { return csvToJson(text); }
 }
 
-// ── View IDs — all from Anish's workspace ─────────────────────────────────────
+// ── View IDs — correct IDs from each workspace ────────────────────────────────
 const VIEWS = {
-  crm:      { id: '172632000001964013', ws: WS_ANISH }, // Deals (Zoho CRM)
-  invoices: { id: '172632000001967250', ws: WS_ANISH }, // Invoices (Zoho Books)
-  meta:     { id: '172632000001964071', ws: WS_ANISH }, // Campaign Insights (Facebook Ads)
-  linkedin: { id: '172632000001964086', ws: WS_ANISH }, // Campaigns Performance (LinkedIn Ads)
-  google:   { id: '172632000001964061', ws: WS_ANISH }, // Campaign Performance (Google Ads)
+  crm:      { id: '172632000001936642', ws: WS_ANISH }, // Deals — Anish's workspace
+  invoices: { id: '172632000001967250', ws: WS_MINE  }, // Invoices — your workspace (real-time)
+  meta:     { id: '172632000001947117', ws: WS_ANISH }, // Campaign Insights — Anish's workspace
+  linkedin: { id: '172632000001949105', ws: WS_ANISH }, // Campaigns Performance — Anish's workspace
+  google:   { id: '172632000001946295', ws: WS_ANISH }, // Campaign Performance — Anish's workspace
 };
 
 // Helper — fetch using the view's own workspace
