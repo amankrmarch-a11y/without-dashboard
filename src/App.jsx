@@ -1141,7 +1141,8 @@ export default function App() {
           const statusRaw = (inv['Invoice Status']||inv['Status']||'').toLowerCase().trim();
           const status = statusRaw==='closed'?'Closed':statusRaw==='overdue'?'Overdue':null;
           if(!status) return null;
-          const bizType = (inv['CF.Business Type']||inv['Business Type']||inv['business type']||'B2B').trim();
+          // B2B = starts with "B2B" | D2C = D2C Shopify, D2C Amazon, B2C Special Order, or empty
+          const bizType = (inv['CF.Business Type']||inv['Business Type']||inv['business type']||'D2C').trim();
           if(/^grant/i.test(bizType)) return null;
           const subtotal = parseAmt(inv['Sub Total (BCY)']||inv['SubTotal']||'0');
           const balance  = parseAmt(inv['Balance (BCY)']||inv['Balance']||'0');
