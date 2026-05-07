@@ -47,12 +47,12 @@ function parseLine(line) {
 const WS_ANISH = '172632000001878083';
 
 async function fetchView(token, viewId, workspaceId, orgId) {
-  const url = `https://analyticsapi.zoho.in/restapi/v2/workspaces/${workspaceId}/views/${viewId}/data?responseFormat=json`;
+  const url = `https://analyticsapi.zoho.in/restapi/v2/workspaces/${workspaceId}/views/${viewId}/data`;
   const r = await fetch(url, {
     headers: {
       'Authorization': `Zoho-oauthtoken ${token}`,
       'ZANALYTICS-ORGID': orgId,
-      'Accept': 'application/json'
+      'ZANALYTICS-OUTPUTFORMAT': 'json'
     }
   });
   const text = await r.text();
