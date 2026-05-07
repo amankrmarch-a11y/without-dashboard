@@ -75,7 +75,7 @@ async function fetchView(token, viewId, workspaceId, orgId) {
 // ── View IDs — correct IDs from each workspace ────────────────────────────────
 const VIEWS = {
   crm:      { id: '172632000001936642', ws: WS_ANISH }, // Deals — Anish's workspace
-  invoices: { id: '172632000002045340', ws: WS_ANISH }, // Invoices — Anish's workspace (Zoho Books)
+  invoices: { id: '172632000002062591', ws: WS_ANISH }, // Invoices (Zoho Books) — Anish's workspace
   meta:     { id: '172632000001947117', ws: WS_ANISH }, // Campaign Insights — Anish's workspace
   linkedin: { id: '172632000001949105', ws: WS_ANISH }, // Campaigns Performance — Anish's workspace
   google:   { id: '172632000001946295', ws: WS_ANISH }, // Campaign Performance — Anish's workspace
