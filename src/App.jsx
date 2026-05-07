@@ -1141,8 +1141,8 @@ export default function App() {
           const statusRaw = (inv['Invoice Status']||inv['Status']||'').toLowerCase().trim();
           const status = statusRaw==='closed'?'Closed':statusRaw==='overdue'?'Overdue':null;
           if(!status) return null;
-          const bizType = (inv['CF.Business Type']||inv['Business Type']||inv['business type']||'').trim();
-          if(/^grant/i.test(bizType)||bizType.length<2) return null;
+          const bizType = (inv['CF.Business Type']||inv['Business Type']||inv['business type']||'B2B').trim();
+          if(/^grant/i.test(bizType)) return null;
           const subtotal = parseAmt(inv['Sub Total (BCY)']||inv['SubTotal']||'0');
           const balance  = parseAmt(inv['Balance (BCY)']||inv['Balance']||'0');
           const customer = inv['Customer ID']||'';
@@ -1249,7 +1249,7 @@ export default function App() {
           totalRaw += parsed.length;
           allParsed = [...allParsed, ...parsed];
           const invB2B = parsed.filter(r=>/^B2B/i.test(r.businessType));
-          const invD2C = parsed.filter(r=>/^(D2C|B2C)/i.test(r.businessType));
+          const invD2C = parsed.filter(r=>/^(D2C|B2C)/i.test(r.businessType||''));
           const ymRange = [...new Set(parsed.map(r=>r.yearMonth).filter(Boolean))].sort();
           dbg.push(`✓ ${file.name} (${encoding})\n  ${parsed.length} invoices | B2B: ${invB2B.length} ₹${invB2B.reduce((s,r)=>s+r.subtotal,0).toLocaleString('en-IN')} | D2C: ${invD2C.length} ₹${invD2C.reduce((s,r)=>s+r.subtotal,0).toLocaleString('en-IN')}\n  Period: ${ymRange[0]||'?'} → ${ymRange[ymRange.length-1]||'?'}`);
         } catch(fileErr) {
@@ -1587,7 +1587,8 @@ export default function App() {
           // ── Invoice revenue filtered by overview date ─────────────────────────
           // B2B ROAS = B2B Invoice Revenue (Closed+Overdue, type starts "B2B") / Total Ad Spend
           const isB2BInv = bt => /^B2B/i.test(bt||"");
-          const isD2CInv = bt => /^(D2C|B2C)/i.test(bt||"") && !/^B2B/i.test(bt||"");
+          // D2C: D2C Shopify, D2C Amazon (start with D2C) OR B2C Special Order
+          const isD2CInv = bt => (/^D2C/i.test(bt||"") || /^B2C\s*Special/i.test(bt||"")) && !/^B2B/i.test(bt||"");
 
           const b2bRevHome = invoiceData
             .filter(r => isB2BInv(r.businessType||r.type||""))
@@ -2729,7 +2730,7 @@ export default function App() {
           });
           const totalRev   = allInv.reduce((s,r)=>s+r.subtotal,0);
           const b2bInv     = allInv.filter(r=>/^B2B/i.test(r.businessType));
-          const d2cInv     = allInv.filter(r=>/^(D2C|B2C)/i.test(r.businessType));
+          const d2cInv     = allInv.filter(r=>/^D2C/i.test(r.businessType||'') || /^B2C\s*Special/i.test(r.businessType||''));
           const b2bRev     = b2bInv.reduce((s,r)=>s+r.subtotal,0);
           const d2cRev     = d2cInv.reduce((s,r)=>s+r.subtotal,0);
           const closedRev  = allInv.filter(r=>r.status==="Closed").reduce((s,r)=>s+r.subtotal,0);
