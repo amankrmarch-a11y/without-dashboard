@@ -47,11 +47,12 @@ function parseLine(line) {
 const WS_ANISH = '172632000001878083';
 
 async function fetchView(token, viewId, workspaceId, orgId) {
-  const url = `https://analyticsapi.zoho.in/restapi/v2/workspaces/${workspaceId}/views/${viewId}/data`;
+  const url = `https://analyticsapi.zoho.in/restapi/v2/workspaces/${workspaceId}/views/${viewId}/data?responseFormat=json`;
   const r = await fetch(url, {
     headers: {
       'Authorization': `Zoho-oauthtoken ${token}`,
-      'ZANALYTICS-ORGID': orgId
+      'ZANALYTICS-ORGID': orgId,
+      'Accept': 'application/json'
     }
   });
   const text = await r.text();
@@ -61,7 +62,7 @@ async function fetchView(token, viewId, workspaceId, orgId) {
 // ── View IDs — correct IDs from each workspace ────────────────────────────────
 const VIEWS = {
   crm:      { id: '172632000001936642', ws: WS_ANISH }, // Deals — Anish's workspace
-  invoices: { id: '172632000002062591', ws: WS_ANISH }, // Invoices — Anish's workspace (Zoho Books)
+  invoices: { id: '172632000002045340', ws: WS_ANISH }, // Invoices — Anish's workspace (Zoho Books)
   meta:     { id: '172632000001947117', ws: WS_ANISH }, // Campaign Insights — Anish's workspace
   linkedin: { id: '172632000001949105', ws: WS_ANISH }, // Campaigns Performance — Anish's workspace
   google:   { id: '172632000001946295', ws: WS_ANISH }, // Campaign Performance — Anish's workspace
