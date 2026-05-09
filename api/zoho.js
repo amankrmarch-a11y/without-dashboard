@@ -73,63 +73,44 @@ function csvToJson(csv) {
 // ── Single workspace — everything on Anish's (syncs daily) ───────────────────
 const WS_ANISH = '172632000001878083';
 
-// ── fetchView with pagination + explicit JSON response format ────────────────
-// Zoho Analytics /data endpoint paginates. Without CONFIG, the response format
-// and row limit are workspace-dependent (often ~1k rows). We force JSON output
-// and walk pages until we get a short page back.
+// fetchView — original simple GET (which was working), only csvToJson is upgraded
 async function fetchView(token, viewId, workspaceId, orgId) {
-  const baseUrl = `https://analyticsapi.zoho.in/restapi/v2/workspaces/${workspaceId}/views/${viewId}/data`;
-  const PAGE_SIZE = 10000;
-  const MAX_PAGES = 20; // safety cap → 200k rows
-  const all = [];
-
-  for (let pageIndex = 1; pageIndex <= MAX_PAGES; pageIndex++) {
-    const config = encodeURIComponent(JSON.stringify({
-      responseFormat: 'json',
-      keyValueFormat: true,
-      pageIndex,
-      rowsPerPage: PAGE_SIZE
-    }));
-
-    const r = await fetch(`${baseUrl}?CONFIG=${config}`, {
-      headers: {
-        'Authorization': `Zoho-oauthtoken ${token}`,
-        'ZANALYTICS-ORGID': orgId,
-        'Accept': 'application/json'
-      }
-    });
-    const text = await r.text();
-
-    let pageRows;
-    try {
-      const parsed = JSON.parse(text);
-      // Zoho Analytics v2 JSON shapes seen in the wild:
-      //   { data: [...] }
-      //   { response: { data: [...] } }
-      //   [...]
-      if (Array.isArray(parsed)) pageRows = parsed;
-      else if (Array.isArray(parsed.data)) pageRows = parsed.data;
-      else if (Array.isArray(parsed.response?.data)) pageRows = parsed.response.data;
-      else if (Array.isArray(parsed.response?.rows)) pageRows = parsed.response.rows;
-      else pageRows = [];
-    } catch {
-      pageRows = csvToJson(text);
+  const url = `https://analyticsapi.zoho.in/restapi/v2/workspaces/${workspaceId}/views/${viewId}/data`;
+  const r = await fetch(url, {
+    headers: {
+      'Authorization': `Zoho-oauthtoken ${token}`,
+      'ZANALYTICS-ORGID': orgId
     }
-
-    if (!Array.isArray(pageRows) || pageRows.length === 0) break;
-    all.push(...pageRows);
-    if (pageRows.length < PAGE_SIZE) break; // last page
-  }
-  return all;
+  });
+  const text = await r.text();
+  try { return JSON.parse(text); } catch { return csvToJson(text); }
 }
 
-// ── View IDs — correct IDs from each workspace ────────────────────────────────
+// raw fetch — for the debug endpoint, returns the response text untouched
+async function fetchViewRaw(token, viewId, workspaceId, orgId) {
+  const url = `https://analyticsapi.zoho.in/restapi/v2/workspaces/${workspaceId}/views/${viewId}/data`;
+  const r = await fetch(url, {
+    headers: {
+      'Authorization': `Zoho-oauthtoken ${token}`,
+      'ZANALYTICS-ORGID': orgId
+    }
+  });
+  const text = await r.text();
+  return {
+    status: r.status,
+    contentType: r.headers.get('content-type') || '',
+    length: text.length,
+    head: text.slice(0, 2000),
+    tail: text.slice(-2000)
+  };
+}
+
 const VIEWS = {
-  crm:      { id: '172632000001936642', ws: WS_ANISH }, // Deals
-  invoices: { id: '172632000002062591', ws: WS_ANISH }, // Invoices (Zoho Books)
-  meta:     { id: '172632000001947117', ws: WS_ANISH }, // Campaign Insights
-  linkedin: { id: '172632000001949105', ws: WS_ANISH }, // Campaigns Performance
-  google:   { id: '172632000001946295', ws: WS_ANISH }, // Campaign Performance
+  crm:      { id: '172632000001936642', ws: WS_ANISH },
+  invoices: { id: '172632000002062591', ws: WS_ANISH },
+  meta:     { id: '172632000001947117', ws: WS_ANISH },
+  linkedin: { id: '172632000001949105', ws: WS_ANISH },
+  google:   { id: '172632000001946295', ws: WS_ANISH },
 };
 
 const fetchV = (token, key, orgId) =>
@@ -215,7 +196,15 @@ export default async function handler(req, res) {
       });
     }
 
-    return res.json({ success: true, message: 'v14 Zoho API with pagination + multi-line CSV parser — sources: critical | ads | all | crm | invoices | meta | linkedin | google | list_views' });
+    // Debug — see exactly what Zoho returns for a given view (head + tail of raw response)
+    if (source && source.startsWith('debug_')) {
+      const key = source.replace('debug_', '');
+      if (!VIEWS[key]) return res.json({ success: false, error: 'unknown view: ' + key });
+      const debug = await fetchViewRaw(token, VIEWS[key].id, VIEWS[key].ws, ORG);
+      return res.json({ success: true, source, ...debug });
+    }
+
+    return res.json({ success: true, message: 'v15 — sources: critical | ads | all | crm | invoices | meta | linkedin | google | list_views | debug_<view>' });
 
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
