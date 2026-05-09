@@ -167,7 +167,7 @@ export default function App() {
   const[crmData,setCrmData]=useState(()=>lsGet("wo_crm",EMPTY_CRM));
   const[crmFiles,setCrmFiles]=useState([]);const[crmSub,setCrmSub]=useState(false);const[crmDone,setCrmDone]=useState(false);const[crmError,setCrmError]=useState(null);const[crmDebug,setCrmDebug]=useState(null);const[selectedOwner,setSelectedOwner]=useState(null);
   useEffect(()=>{lsSave("wo_crm",crmData);},[crmData]);
-  const EMPTY_SOC={igProfile:null,igReach:[],igReels:[],liDaily:[],liCountry:[],liIndustry:[]};
+  const EMPTY_SOC={igProfile:null,igReach:[],liDaily:[],liCountry:[],liIndustry:[]};
   const[socialsData,setSocials]=useState(()=>lsGet("wo_socials",EMPTY_SOC));
   useEffect(()=>{lsSave("wo_socials",socialsData);},[socialsData]);
   const[socFromDate,setSocFromDate]=useState("");const[socToDate,setSocToDate]=useState("");
@@ -224,8 +224,6 @@ export default function App() {
           if(ipRows.length){const r=ipRows[0];next.igProfile={username:r['Username']||'',name:r['Name']||'',bio:r['Biography']||'',followers:toNum(r['Followers']),follows:toNum(r['Follows']),media:toNum(r['Media']),website:r['Website']||'',profileUrl:r['Profile Url']||''};}
           // IG daily reach
           next.igReach=(jS.igReach?.data||[]).map(r=>{const date=toDate(r['End Time']);return{date,yearMonth:date?date.slice(0,7):'',reach:toNum(r['Reach'])};}).filter(r=>r.date).sort((a,b)=>a.date.localeCompare(b.date));
-          // IG reels
-          next.igReels=(jS.igReels?.data||[]).map(r=>{const likes=toNum(r['Likes']);const comments=toNum(r['Comments']);const reach=toNum(r['Reach']);const saved=toNum(r['Saved']);const shares=toNum(r['Shares']);const interactions=toNum(r['Total Interactions'])||(likes+comments+saved+shares);return{reelId:r['Reel ID']||'',likes,comments,reach,saved,shares,interactions,engRate:reach>0?parseFloat(((interactions/reach)*100).toFixed(2)):0};}).sort((a,b)=>b.reach-a.reach);
           // LinkedIn daily new followers
           next.liDaily=(jS.liDaily?.data||[]).map(r=>{const date=toDate(r['Date']);return{date,yearMonth:date?date.slice(0,7):'',organic:toNum(r['Organic Follower Count']),paid:toNum(r['Paid Follower Count']),total:toNum(r['Total Followers'])};}).filter(r=>r.date).sort((a,b)=>a.date.localeCompare(b.date));
           // LinkedIn followers by country (snapshot)
@@ -234,7 +232,7 @@ export default function App() {
           next.liIndustry=(jS.liIndustry?.data||[]).map(r=>({industry:r['Industries Name']||'',organic:toNum(r['Organic Follower Count']),paid:toNum(r['Paid Follower Count']),total:toNum(r['Total Followers'])})).filter(r=>r.industry&&r.total>0).sort((a,b)=>b.total-a.total);
           setSocials(next);
           const liTotal=next.liCountry.reduce((s,r)=>s+r.total,0);
-          results.push(`✅ Socials: IG ${next.igProfile?.followers||0} foll. · ${next.igReach.length}d reach · ${next.igReels.length} reels | LI ${liTotal} foll. · ${next.liDaily.length}d · ${next.liCountry.length} countries · ${next.liIndustry.length} industries`);
+          results.push(`✅ Socials: IG ${next.igProfile?.followers||0} foll. · ${next.igReach.length}d reach | LI ${liTotal} foll. · ${next.liDaily.length}d · ${next.liCountry.length} countries · ${next.liIndustry.length} industries`);
         } else results.push('⚠️ Socials: '+(jS.error||'failed'));
       } catch(e){results.push('⚠️ Socials: '+e.message);}
 
@@ -519,9 +517,6 @@ export default function App() {
           let runningTotal=baselineFollowers;
           const liCumulative=liDailySorted.map(r=>{runningTotal+=r.total;return{date:r.date,daily:r.total,cumulative:runningTotal};});
           const liCumulativeInPeriod=liCumulative.filter(r=>inSocRange(r.date));
-          // Top reels
-          const topReelsByReach=[...socialsData.igReels].sort((a,b)=>b.reach-a.reach).slice(0,10);
-          const topReelsByEng=[...socialsData.igReels].sort((a,b)=>b.interactions-a.interactions).slice(0,5);
           // Top countries / industries
           const topCountries=socialsData.liCountry.slice(0,10);
           const topIndustries=socialsData.liIndustry.slice(0,10);
@@ -554,7 +549,7 @@ export default function App() {
                     <div style={{fontWeight:800,fontSize:15,color:C.text}}>{ig.name||ig.username}</div>
                     <div style={{fontSize:11,color:C.muted,marginBottom:6}}>@{ig.username}</div>
                     <div style={{fontSize:11,color:C.sub,lineHeight:1.5,whiteSpace:"pre-line",maxHeight:48,overflow:"hidden"}}>{ig.bio}</div>
-                    {ig.website&&<a href={ig.website} target="_blank" rel="noreferrer" style={{fontSize:11,color:IG_COLOR,fontWeight:600,textDecoration:"none",marginTop:6,display:"inline-block"}}>↗ {ig.website.replace(/^https?:\/\//,'').replace(/\/$/,'')}</a>}
+                    <a href="https://without.live/" target="_blank" rel="noreferrer" style={{fontSize:11,color:IG_COLOR,fontWeight:600,textDecoration:"none",marginTop:6,display:"inline-block"}}>↗ without.live</a>
                   </div>
                 </div>)}
                 {/* LI profile card */}
@@ -605,10 +600,29 @@ export default function App() {
                 {topIndustries.length>0&&(<div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:14,padding:"16px",boxShadow:"0 2px 8px rgba(45,45,78,0.06)"}}><div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:12}}>LinkedIn Followers by Industry <span style={{fontSize:10,color:C.muted,fontWeight:400}}>top 10{otherIndustriesCount?` of ${socialsData.liIndustry.length}`:""}</span></div>{topIndustries.map((it,i)=>{const pct=liTotal?(it.total/liTotal)*100:0;return(<div key={it.industry} style={{marginBottom:9}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}><span style={{fontSize:11,color:C.text,fontWeight:600,maxWidth:"70%",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{i+1}. {it.industry}</span><div style={{display:"flex",gap:8}}><span style={{fontSize:11,fontFamily:"'DM Mono',monospace",fontWeight:700,color:LI_COLOR}}>{fmtNum(it.total)}</span><span style={{fontSize:10,color:C.muted,width:36,textAlign:"right"}}>{pct.toFixed(1)}%</span></div></div><div style={{background:C.border,borderRadius:3,height:5,overflow:"hidden"}}><div style={{height:"100%",background:LI_COLOR,borderRadius:3,width:`${Math.min(100,pct)}%`,transition:"width .4s"}}/></div></div>);})}{otherIndustriesCount>0&&<div style={{fontSize:10,color:C.muted,marginTop:8,textAlign:"center"}}>+ {otherIndustriesCount} more industries</div>}</div>)}
               </div>)}
 
-              {/* Top reels */}
-              {topReelsByReach.length>0&&(<div><SectionHead title="Top Reels" sub="all-time · ranked by reach · Zoho's report doesn't expose date or caption"/>
-                <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:12,overflow:"hidden",boxShadow:"0 2px 8px rgba(45,45,78,0.06)"}}><div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:560}}><thead><tr style={{background:C.cardAlt}}>{["#","Reel ID","Reach","Likes","Comments","Shares","Saves","Total Eng.","Eng. Rate"].map(h=><th key={h} style={{textAlign:"left",padding:"7px 10px",color:C.muted,fontWeight:700,fontSize:9,textTransform:"uppercase",letterSpacing:0.7,whiteSpace:"nowrap"}}>{h}</th>)}</tr></thead><tbody>{topReelsByReach.map((r,i)=>(<tr key={r.reelId} className="tr" style={{borderTop:`1px solid ${C.border}`}}><td style={{padding:"7px 10px",fontWeight:800,color:i===0?IG_COLOR:C.muted,fontSize:12}}>{i+1}</td><td style={{padding:"7px 10px",fontFamily:"'DM Mono',monospace",fontSize:10.5,color:C.sub}}>{r.reelId}</td><td style={{padding:"7px 10px",fontFamily:"'DM Mono',monospace",fontWeight:700,color:IG_COLOR}}>{fmtNum(r.reach)}</td><td style={{padding:"7px 10px",color:C.sub}}>{fmtNum(r.likes)}</td><td style={{padding:"7px 10px",color:C.sub}}>{fmtNum(r.comments)}</td><td style={{padding:"7px 10px",color:C.sub}}>{fmtNum(r.shares)}</td><td style={{padding:"7px 10px",color:C.sub}}>{fmtNum(r.saved)}</td><td style={{padding:"7px 10px",fontFamily:"'DM Mono',monospace",fontWeight:600}}>{fmtNum(r.interactions)}</td><td style={{padding:"7px 10px"}}><span style={{background:r.engRate>=10?`${IG_COLOR}18`:r.engRate>=5?C.accentLt:C.cardAlt,color:r.engRate>=10?IG_COLOR:r.engRate>=5?C.accent:C.muted,fontFamily:"'DM Mono',monospace",fontWeight:700,padding:"2px 7px",borderRadius:4,fontSize:10}}>{r.engRate}%</span></td></tr>))}</tbody></table></div></div>
-              </div>)}
+              {/* Press & Recognition */}
+              <div><SectionHead title="Press & Recognition" sub="featured features and highlight content"/>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(240px,1fr))",gap:12}}>
+                  {[
+                    {label:"Business Insider",sub:"Featured story",href:"https://www.youtube.com/watch?v=i8zQtMUmRTM",ytId:"i8zQtMUmRTM",badge:"BI",badgeColor:"#0c0c0c"},
+                    {label:"Shark Tank India",sub:"Featured episode",href:"https://www.youtube.com/watch?v=Tf0AAgvNmOk",ytId:"Tf0AAgvNmOk",badge:"ST",badgeColor:"#06402b"},
+                    {label:"Featured Reel",sub:"@shop.without on Instagram",href:"https://www.instagram.com/reel/DRUVcKmjz6g/",igReel:"DRUVcKmjz6g",badge:"IG",badgeColor:IG_COLOR}
+                  ].map(item=>(
+                    <a key={item.label} href={item.href} target="_blank" rel="noreferrer" style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:14,overflow:"hidden",textDecoration:"none",color:"inherit",display:"flex",flexDirection:"column",boxShadow:"0 2px 8px rgba(45,45,78,0.06)",transition:"all .2s",cursor:"pointer"}} onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-2px)";e.currentTarget.style.boxShadow="0 8px 20px rgba(45,45,78,0.12)";}} onMouseLeave={e=>{e.currentTarget.style.transform="";e.currentTarget.style.boxShadow="0 2px 8px rgba(45,45,78,0.06)";}}>
+                      <div style={{position:"relative",width:"100%",aspectRatio:"16/9",background:item.igReel?`linear-gradient(135deg, #f09433 0%, #e6683c 25%, #dc2743 50%, #cc2366 75%, #bc1888 100%)`:"#000",overflow:"hidden",display:"flex",alignItems:"center",justifyContent:"center"}}>
+                        {item.ytId&&<img src={`https://img.youtube.com/vi/${item.ytId}/hqdefault.jpg`} alt={item.label} style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}} onError={e=>{e.target.style.display='none';}}/>}
+                        {item.igReel&&<div style={{color:"#fff",fontSize:46,fontWeight:900,opacity:0.85,textShadow:"0 2px 12px rgba(0,0,0,0.3)"}}>◉</div>}
+                        <div style={{position:"absolute",top:8,left:8,background:item.badgeColor,color:"#fff",fontSize:9,fontWeight:800,padding:"3px 8px",borderRadius:4,letterSpacing:1}}>{item.badge}</div>
+                        {item.ytId&&<div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",pointerEvents:"none"}}><div style={{width:46,height:46,borderRadius:"50%",background:"rgba(0,0,0,0.65)",display:"flex",alignItems:"center",justifyContent:"center",backdropFilter:"blur(2px)"}}><div style={{width:0,height:0,borderTop:"9px solid transparent",borderBottom:"9px solid transparent",borderLeft:"14px solid #fff",marginLeft:4}}/></div></div>}
+                      </div>
+                      <div style={{padding:"12px 14px"}}>
+                        <div style={{fontWeight:800,fontSize:13,color:C.text,marginBottom:2}}>{item.label}</div>
+                        <div style={{fontSize:11,color:C.muted}}>{item.sub} <span style={{color:C.accent,fontWeight:600,marginLeft:4}}>↗ Watch</span></div>
+                      </div>
+                    </a>
+                  ))}
+                </div>
+              </div>
             </>)}
           </div>
           );
