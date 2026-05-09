@@ -119,7 +119,11 @@ function parseInvoiceFile(rows) {
     const status = String(row[colStatus]||"").trim();
     if(!["Closed","Overdue"].includes(status)) return;         // Rule 1: exclude DRAFT
     const bizType = String(row[colBizType]||"").trim();
-    if(!bizType||/^grant/i.test(bizType)||bizType.length<2) return;
+    // Exclude: Grants, Samples, empty, too short
+    if(!bizType||/^grant/i.test(bizType)||/^sample/i.test(bizType)||bizType.length<2) return;
+    // B2B = starts with B2B | D2C = D2C (Shopify) | rest excluded
+    const isB2B=/^B2B/i.test(bizType);const isD2C=/^D2C/i.test(bizType)||/^B2C/i.test(bizType);
+    if(!isB2B&&!isD2C) return;
     seen.add(invNum);
     const month     = toMonth(row[colDate])||"—";              // Rule 2: Invoice Date
     const yearMonth = toYearMonth(row[colDate])||month;
