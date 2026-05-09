@@ -111,6 +111,13 @@ const VIEWS = {
   meta:     { id: '172632000001947117', ws: WS_ANISH },
   linkedin: { id: '172632000001949105', ws: WS_ANISH },
   google:   { id: '172632000001946295', ws: WS_ANISH },
+  // ── Socials (Zoho Social → Zoho Analytics) ──────────────────────────────────
+  ig_profile:    { id: '172632000001943441', ws: WS_ANISH }, // Profile Information (Instagram)
+  ig_reach:      { id: '172632000001943691', ws: WS_ANISH }, // Profile Insights (Instagram) — daily Reach
+  ig_reels:      { id: '172632000001943719', ws: WS_ANISH }, // Reels Insights (Instagram)
+  li_daily:      { id: '172632000001943970', ws: WS_ANISH }, // Follower Counts By Date (LinkedIn)
+  li_country:    { id: '172632000001944018', ws: WS_ANISH }, // Follower Counts By Country (LinkedIn)
+  li_industry:   { id: '172632000001943994', ws: WS_ANISH }, // Follower Counts By Industries (LinkedIn)
 };
 
 const fetchV = (token, key, orgId) =>
@@ -157,6 +164,27 @@ export default async function handler(req, res) {
         meta:     wrap(meta,     'meta'),
         linkedin: wrap(linkedin, 'linkedin'),
         google:   wrap(google,   'google'),
+      });
+    }
+
+    // ── Socials — IG (3 views) + LinkedIn (3 views), all in parallel ─────────
+    if (source === 'socials') {
+      const [igProfile, igReach, igReels, liDaily, liCountry, liIndustry] = await Promise.all([
+        fetchV(token, 'ig_profile',  ORG),
+        fetchV(token, 'ig_reach',    ORG),
+        fetchV(token, 'ig_reels',    ORG),
+        fetchV(token, 'li_daily',    ORG),
+        fetchV(token, 'li_country',  ORG),
+        fetchV(token, 'li_industry', ORG),
+      ]);
+      return res.json({
+        success: true, source: 'socials',
+        igProfile:  wrap(igProfile,  'ig_profile'),
+        igReach:    wrap(igReach,    'ig_reach'),
+        igReels:    wrap(igReels,    'ig_reels'),
+        liDaily:    wrap(liDaily,    'li_daily'),
+        liCountry:  wrap(liCountry,  'li_country'),
+        liIndustry: wrap(liIndustry, 'li_industry'),
       });
     }
 

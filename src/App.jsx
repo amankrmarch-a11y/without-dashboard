@@ -167,6 +167,10 @@ export default function App() {
   const[crmData,setCrmData]=useState(()=>lsGet("wo_crm",EMPTY_CRM));
   const[crmFiles,setCrmFiles]=useState([]);const[crmSub,setCrmSub]=useState(false);const[crmDone,setCrmDone]=useState(false);const[crmError,setCrmError]=useState(null);const[crmDebug,setCrmDebug]=useState(null);const[selectedOwner,setSelectedOwner]=useState(null);
   useEffect(()=>{lsSave("wo_crm",crmData);},[crmData]);
+  const EMPTY_SOC={igProfile:null,igReach:[],igReels:[],liDaily:[],liCountry:[],liIndustry:[]};
+  const[socialsData,setSocials]=useState(()=>lsGet("wo_socials",EMPTY_SOC));
+  useEffect(()=>{lsSave("wo_socials",socialsData);},[socialsData]);
+  const[socFromDate,setSocFromDate]=useState("");const[socToDate,setSocToDate]=useState("");
   const[ovFrom,setOvFrom]=useState("");const[ovTo,setOvTo]=useState("");
   const[crmFromDate,setCrmFromDate]=useState("");const[crmToDate,setCrmToDate]=useState("");const[crmAppliedFrom,setCrmAppliedFrom]=useState("");const[crmAppliedTo,setCrmAppliedTo]=useState("");
   const[invFromDate,setInvFromDate]=useState("");const[invToDate,setInvToDate]=useState("");
@@ -209,6 +213,31 @@ export default function App() {
       if(json.meta?.data?.length){const metaResult=parseAdsRows(json.meta.data,['Amount Spent'],['Clicks (All)','Link Clicks','Clicks'],['Impressions'],['Leads (Form)','Leads','Results'],['Reporting Starts','Reporting Ends','Date']);if(metaResult.monthly.length>0){setLive(prev=>({...prev,meta:metaResult.monthly,metaDaily:metaResult.daily}));results.push(`✅ Meta: ${metaResult.daily.length} days`);}else results.push(`⚠️ Meta: 0 months`);}else results.push(`⚠️ Meta: no data`);
       if(json.linkedin?.data?.length){const liResult=parseAdsRows(json.linkedin.data,['Cost In Local Currency','Cost In Usd','Total Spent'],['Clicks','Card Clicks','Action Clicks'],['Impressions','Card Impressions'],['One Click Leads','Leads','External Website Conversions'],['Date']);if(liResult.monthly.length>0){setLive(prev=>({...prev,linkedin:liResult.monthly,linkedinDaily:liResult.daily}));results.push(`✅ LinkedIn: ${liResult.daily.length} days`);}else results.push(`⚠️ LinkedIn: 0 months`);}else results.push(`⚠️ LinkedIn: no data`);
       if(json.google?.data?.length){const gResult=parseAdsRows(json.google.data,['Costs'],['Clicks','Interactions'],['Impressions'],['Conversions','All Conversions'],['Day']);if(gResult.monthly.length>0){setLive(prev=>({...prev,google:gResult.monthly,googleDaily:gResult.daily}));results.push(`✅ Google: ${gResult.daily.length} days`);}else results.push(`⚠️ Google: 0 months`);}else results.push(`⚠️ Google: no data`);
+
+      // ── Phase 3: Socials (IG + LinkedIn) ───────────────────────────────────
+      try{
+        const respS=await fetch('/api/zoho?source=socials');const jS=await respS.json();
+        if(jS.success){
+          const next={...EMPTY_SOC};
+          // IG profile (1 row snapshot)
+          const ipRows=jS.igProfile?.data||[];
+          if(ipRows.length){const r=ipRows[0];next.igProfile={username:r['Username']||'',name:r['Name']||'',bio:r['Biography']||'',followers:toNum(r['Followers']),follows:toNum(r['Follows']),media:toNum(r['Media']),website:r['Website']||'',profileUrl:r['Profile Url']||''};}
+          // IG daily reach
+          next.igReach=(jS.igReach?.data||[]).map(r=>{const date=toDate(r['End Time']);return{date,yearMonth:date?date.slice(0,7):'',reach:toNum(r['Reach'])};}).filter(r=>r.date).sort((a,b)=>a.date.localeCompare(b.date));
+          // IG reels
+          next.igReels=(jS.igReels?.data||[]).map(r=>{const likes=toNum(r['Likes']);const comments=toNum(r['Comments']);const reach=toNum(r['Reach']);const saved=toNum(r['Saved']);const shares=toNum(r['Shares']);const interactions=toNum(r['Total Interactions'])||(likes+comments+saved+shares);return{reelId:r['Reel ID']||'',likes,comments,reach,saved,shares,interactions,engRate:reach>0?parseFloat(((interactions/reach)*100).toFixed(2)):0};}).sort((a,b)=>b.reach-a.reach);
+          // LinkedIn daily new followers
+          next.liDaily=(jS.liDaily?.data||[]).map(r=>{const date=toDate(r['Date']);return{date,yearMonth:date?date.slice(0,7):'',organic:toNum(r['Organic Follower Count']),paid:toNum(r['Paid Follower Count']),total:toNum(r['Total Followers'])};}).filter(r=>r.date).sort((a,b)=>a.date.localeCompare(b.date));
+          // LinkedIn followers by country (snapshot)
+          next.liCountry=(jS.liCountry?.data||[]).map(r=>({country:r['Country Name']||'',organic:toNum(r['Organic Follower Count']),paid:toNum(r['Paid Follower Count']),total:toNum(r['Total Followers'])})).filter(r=>r.country&&r.total>0).sort((a,b)=>b.total-a.total);
+          // LinkedIn followers by industry (snapshot)
+          next.liIndustry=(jS.liIndustry?.data||[]).map(r=>({industry:r['Industries Name']||'',organic:toNum(r['Organic Follower Count']),paid:toNum(r['Paid Follower Count']),total:toNum(r['Total Followers'])})).filter(r=>r.industry&&r.total>0).sort((a,b)=>b.total-a.total);
+          setSocials(next);
+          const liTotal=next.liCountry.reduce((s,r)=>s+r.total,0);
+          results.push(`✅ Socials: IG ${next.igProfile?.followers||0} foll. · ${next.igReach.length}d reach · ${next.igReels.length} reels | LI ${liTotal} foll. · ${next.liDaily.length}d · ${next.liCountry.length} countries · ${next.liIndustry.length} industries`);
+        } else results.push('⚠️ Socials: '+(jS.error||'failed'));
+      } catch(e){results.push('⚠️ Socials: '+e.message);}
+
       setZohoLastSync(Date.now());lsSave("wo_last_sync_ts",Date.now());setZohoSyncStatus(results.join(' · '));
     }catch(err){setZohoSyncStatus('❌ '+err.message);}finally{setZohoSyncing(false);}
   };
@@ -299,7 +328,7 @@ export default function App() {
   const chanSpendForMonth=ym=>{const ms=findM(md,ym)||{spend:0};const ls=findM(ld,ym)||{spend:0};const gs=findM(gd,ym)||{spend:0};if(activeChan==="Meta")return ms.spend;if(activeChan==="LinkedIn")return ls.spend;if(activeChan==="Google")return gs.spend;return ms.spend+ls.spend+gs.spend;};
   const monthlyRevSpend=allMonthsUnion.map(ym=>({month:ymLabel(ym),yearMonth:ym,revenue:invoiceData.filter(r=>(r.date?r.date.slice(0,7):r.yearMonth)===ym&&/^B2B/i.test(r.businessType||r.type||"")).reduce((s,r)=>s+r.totalSales,0),spend:chanSpendForMonth(ym),roas:0})).map(r=>({...r,roas:r.revenue>0&&r.spend>0?parseFloat((r.revenue/r.spend).toFixed(2)):0})).filter(r=>r.revenue>0||r.spend>0);
 
-  const NAV=[{id:"home",icon:"⬡",label:"Overview"},{id:"ads",icon:"📊",label:"Ad Spend"},{id:"crm",icon:"◈",label:"CRM"},{id:"invoices",icon:"₹",label:"Invoices"},{id:"estimate",icon:"◎",label:"Estimate"}];
+  const NAV=[{id:"home",icon:"⬡",label:"Overview"},{id:"ads",icon:"📊",label:"Ad Spend"},{id:"crm",icon:"◈",label:"CRM"},{id:"invoices",icon:"₹",label:"Invoices"},{id:"socials",icon:"◉",label:"Socials"}];
   const now=new Date();const timeStr=now.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
 
   return(
@@ -468,15 +497,119 @@ export default function App() {
           );
         })()}
 
-        {/* ══ ESTIMATE ══ */}
-        {page==="estimate"&&(()=>{
-          const hasHist=liveData.meta.length>0||liveData.linkedin.length>0||liveData.google.length>0;
+        {/* ══ SOCIALS ══ */}
+        {page==="socials"&&(()=>{
+          const ig=socialsData.igProfile;
+          const liTotal=socialsData.liCountry.reduce((s,r)=>s+r.total,0);
+          const hasIg=!!ig;
+          const hasLi=socialsData.liCountry.length>0||socialsData.liDaily.length>0;
+          const hasAny=hasIg||hasLi;
+          // Date filter
+          const inSocRange=date=>{if(!socFromDate&&!socToDate)return true;if(!date)return false;if(socFromDate&&date<socFromDate)return false;if(socToDate&&date>socToDate)return false;return true;};
+          const reachInPeriod=socialsData.igReach.filter(r=>inSocRange(r.date));
+          const totalReachPeriod=reachInPeriod.reduce((s,r)=>s+r.reach,0);
+          const avgReachPeriod=reachInPeriod.length?Math.round(totalReachPeriod/reachInPeriod.length):0;
+          const liDailyInPeriod=socialsData.liDaily.filter(r=>inSocRange(r.date));
+          const newFollowersPeriod=liDailyInPeriod.reduce((s,r)=>s+r.total,0);
+          const organicShare=newFollowersPeriod>0?Math.round((liDailyInPeriod.reduce((s,r)=>s+r.organic,0)/newFollowersPeriod)*100):0;
+          // LinkedIn cumulative — work backwards from current total
+          const liDailySorted=[...socialsData.liDaily].sort((a,b)=>a.date.localeCompare(b.date));
+          const totalDailySum=liDailySorted.reduce((s,r)=>s+r.total,0);
+          const baselineFollowers=liTotal-totalDailySum;// followers before earliest date in series
+          let runningTotal=baselineFollowers;
+          const liCumulative=liDailySorted.map(r=>{runningTotal+=r.total;return{date:r.date,daily:r.total,cumulative:runningTotal};});
+          const liCumulativeInPeriod=liCumulative.filter(r=>inSocRange(r.date));
+          // Top reels
+          const topReelsByReach=[...socialsData.igReels].sort((a,b)=>b.reach-a.reach).slice(0,10);
+          const topReelsByEng=[...socialsData.igReels].sort((a,b)=>b.interactions-a.interactions).slice(0,5);
+          // Top countries / industries
+          const topCountries=socialsData.liCountry.slice(0,10);
+          const topIndustries=socialsData.liIndustry.slice(0,10);
+          const otherCountriesCount=Math.max(0,socialsData.liCountry.length-10);
+          const otherIndustriesCount=Math.max(0,socialsData.liIndustry.length-10);
+          const ymLabelDay=d=>{if(!d||d.length<10)return d;const months=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];const mi=parseInt(d.slice(5,7),10)-1;return`${parseInt(d.slice(8,10),10)} ${months[mi]||''}`;};
+          const reachChartData=reachInPeriod.map(r=>({label:ymLabelDay(r.date),date:r.date,reach:r.reach}));
+          const liChartData=liCumulativeInPeriod.map(r=>({label:ymLabelDay(r.date),date:r.date,daily:r.daily,cumulative:r.cumulative}));
+          const IG_COLOR='#E1306C';const LI_COLOR=C.li;
           return(
           <div style={{display:"flex",flexDirection:"column",gap:16,maxWidth:"100%"}}>
-            <div><div style={{fontSize:10,color:C.muted,textTransform:"uppercase",letterSpacing:2,fontWeight:700,marginBottom:2}}>AI Budget Planner</div><h1 style={{fontSize:20,fontWeight:800,letterSpacing:-0.5}}>Estimate & Budget Breakdown</h1><p style={{fontSize:12.5,color:C.muted,marginTop:4,lineHeight:1.7}}>Enter your monthly budget and lead target. The planner uses your historical channel performance to recommend the optimal split and forecast expected leads.</p></div>
-            {!hasHist&&<div style={{background:"#fffbeb",border:"1px solid #fde68a",borderRadius:10,padding:"12px 16px",fontSize:12,color:"#92400e"}}>⚠️ Upload ad spend data first to get a data-driven estimate. Without historical data, the planner will use default industry ratios.</div>}
-            <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:12,padding:"20px 24px",boxShadow:"0 1px 4px rgba(0,0,0,0.05)"}}><div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:16}}><div><label style={{fontSize:10,color:C.muted,textTransform:"uppercase",letterSpacing:1,fontWeight:700,display:"block",marginBottom:6}}>Monthly Budget (₹)</label><input value={estBudget} onChange={e=>setEstBudget(e.target.value)} placeholder="e.g. 300000" style={{width:"100%",border:`1px solid ${C.border}`,borderRadius:8,padding:"10px 12px",fontSize:14,fontWeight:700,fontFamily:"'DM Mono',monospace",color:C.text,background:C.bg,outline:"none"}}/><div style={{fontSize:10,color:C.muted,marginTop:4}}>Total budget across all channels</div></div><div><label style={{fontSize:10,color:C.muted,textTransform:"uppercase",letterSpacing:1,fontWeight:700,display:"block",marginBottom:6}}>Lead Target</label><input value={estLeads} onChange={e=>setEstLeads(e.target.value)} placeholder="e.g. 100" style={{width:"100%",border:`1px solid ${C.border}`,borderRadius:8,padding:"10px 12px",fontSize:14,fontWeight:700,fontFamily:"'DM Mono',monospace",color:C.text,background:C.bg,outline:"none"}}/><div style={{fontSize:10,color:C.muted,marginTop:4}}>Number of qualified leads in 1 month</div></div></div><div style={{marginTop:16,display:"flex",gap:10,alignItems:"center"}}><button onClick={runEstimate} disabled={!estBudget||!estLeads} style={{background:estBudget&&estLeads?C.accent:"#ccc",color:"#fff",border:"none",borderRadius:9,padding:"11px 28px",fontSize:13,fontWeight:800,cursor:"pointer",boxShadow:estBudget&&estLeads?"0 4px 14px rgba(90,138,0,0.22)":"none"}}>◎ Generate Breakdown</button>{estResult&&<button onClick={()=>setEstResult(null)} style={{background:"none",border:`1px solid ${C.border}`,borderRadius:7,padding:"8px 14px",fontSize:11,color:C.muted,cursor:"pointer"}}>✕ Reset</button>}</div></div>
-            {estResult&&(<div style={{display:"flex",flexDirection:"column",gap:12}}>{!estResult.hasHistory&&<div style={{background:"#fffbeb",border:"1px solid #fde68a",borderRadius:9,padding:"10px 14px",fontSize:11,color:"#92400e"}}>⚠️ Using default industry ratios (Meta 50% / LinkedIn 30% / Google 20%) — upload historical data for a personalised breakdown.</div>}<SectionHead title="Recommended Budget Split"/><div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:10}}>{[{name:"Meta",budget:estResult.metaBudget,leads:estResult.metaLeads,cpl:estResult.metaCPL,color:C.meta},{name:"LinkedIn",budget:estResult.liBudget,leads:estResult.liLeads,cpl:estResult.liCPL,color:C.li},{name:"Google",budget:estResult.gBudget,leads:estResult.gLeads,cpl:estResult.gCPL,color:C.google}].map(ch=>(<div key={ch.name} style={{background:C.card,border:`2px solid ${ch.color}22`,borderRadius:12,padding:"16px"}}><div style={{display:"flex",alignItems:"center",gap:6,marginBottom:10}}><div style={{width:8,height:8,borderRadius:"50%",background:ch.color}}/><span style={{fontWeight:800,fontSize:13,color:ch.color}}>{ch.name}</span></div><div style={{fontSize:10,color:C.muted,textTransform:"uppercase",letterSpacing:1,fontWeight:700,marginBottom:2}}>Budget</div><div style={{fontSize:20,fontWeight:800,fontFamily:"'DM Mono',monospace",color:C.text,marginBottom:8}}>₹{ch.budget.toLocaleString("en-IN")}</div><div style={{background:C.border,borderRadius:3,height:5,marginBottom:8,overflow:"hidden"}}><div style={{height:"100%",background:ch.color,borderRadius:3,width:`${((ch.budget/estResult.budget)*100).toFixed(0)}%`}}/></div><div style={{display:"flex",justifyContent:"space-between"}}><div><div style={{fontSize:9,color:C.muted,fontWeight:700,textTransform:"uppercase"}}>Est. Leads</div><div style={{fontSize:14,fontWeight:800,color:ch.color}}>{ch.leads}</div></div>{ch.cpl&&<div style={{textAlign:"right"}}><div style={{fontSize:9,color:C.muted,fontWeight:700,textTransform:"uppercase"}}>CPL</div><div style={{fontSize:14,fontWeight:800,color:C.text,fontFamily:"'DM Mono',monospace"}}>₹{ch.cpl}</div></div>}</div><div style={{fontSize:9,color:C.muted,marginTop:6}}>{((ch.budget/estResult.budget)*100).toFixed(0)}% of budget</div></div>))}</div><div style={{background:C.accent,borderRadius:12,padding:"16px 20px",display:"flex",flexWrap:"wrap",gap:20}}>{[{label:"Total Budget",value:`₹${estResult.budget.toLocaleString("en-IN")}`},{label:"Expected Leads",value:String(estResult.totalLeads)},{label:"Blended CPL",value:`₹${Math.round(estResult.budget/estResult.totalLeads).toLocaleString("en-IN")}`},{label:"Win Rate (CRM)",value:crmData.length>0?`${estResult.winRate}%`:"—"},{label:"Expected Wins",value:crmData.length>0?String(estResult.expectedWins):"—"},{label:"Lead Target",value:String(estResult.leadTarget)}].map(k=>(<div key={k.label}><div style={{fontSize:9,color:"rgba(255,255,255,0.65)",textTransform:"uppercase",letterSpacing:1,fontWeight:700,marginBottom:3}}>{k.label}</div><div style={{fontSize:18,fontWeight:800,color:"#fff",fontFamily:"'DM Mono',monospace"}}>{k.value}</div></div>))}</div><div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:12,padding:"16px 18px",fontSize:12,color:C.sub,lineHeight:1.8}}><b style={{color:C.text}}>Recommendation:</b> Based on your historical data, allocate <b style={{color:C.meta}}>₹{estResult.metaBudget.toLocaleString("en-IN")} to Meta</b> ({((estResult.metaBudget/estResult.budget)*100).toFixed(0)}%), <b style={{color:C.li}}>₹{estResult.liBudget.toLocaleString("en-IN")} to LinkedIn</b> ({((estResult.liBudget/estResult.budget)*100).toFixed(0)}%), and <b style={{color:C.google}}>₹{estResult.gBudget.toLocaleString("en-IN")} to Google</b> ({((estResult.gBudget/estResult.budget)*100).toFixed(0)}%). This is expected to generate <b style={{color:C.accent}}>{estResult.totalLeads} leads</b> at a blended CPL of <b>₹{Math.round(estResult.budget/estResult.totalLeads).toLocaleString("en-IN")}</b>.{estResult.leadTarget>estResult.totalLeads?` ⚠️ Your target of ${estResult.leadTarget} leads may need a higher budget — try ₹${Math.round(estResult.budget*(estResult.leadTarget/estResult.totalLeads)).toLocaleString("en-IN")}.`:` ✅ Your budget should comfortably meet the ${estResult.leadTarget}-lead target.`}</div></div>)}
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+              <div><div style={{fontSize:10,color:C.muted,textTransform:"uppercase",letterSpacing:2,fontWeight:700,marginBottom:2}}>Without® · Socials</div><h1 style={{fontSize:20,fontWeight:800,color:C.text,letterSpacing:-0.5}}>Instagram & LinkedIn</h1></div>
+              <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+                <DatePill from={socFromDate} setFrom={setSocFromDate} to={socToDate} setTo={setSocToDate}/>
+                {hasAny&&<button onClick={()=>setSocials(EMPTY_SOC)} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:8,padding:"5px 10px",fontSize:11,fontWeight:600,color:C.muted,cursor:"pointer"}}>🗑 Clear</button>}
+              </div>
+            </div>
+
+            {!hasAny&&(<div style={{background:C.card,border:`2px dashed ${C.border}`,borderRadius:14,padding:"52px 24px",textAlign:"center",display:"flex",flexDirection:"column",alignItems:"center",gap:12}}><div style={{fontSize:32}}>◉</div><div style={{fontWeight:700,fontSize:15,color:C.text}}>No social data yet</div><div style={{fontSize:12.5,color:C.muted,maxWidth:420,lineHeight:1.7}}>Click <b>⚡ Sync Now</b> on the Overview tab to pull live data from Zoho Analytics (IG profile + reach + reels, LinkedIn followers + countries + industries).</div></div>)}
+
+            {hasAny&&(<>
+              {/* Profile cards row */}
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))",gap:12}}>
+                {/* IG profile card */}
+                {hasIg&&(<div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:14,padding:"16px",display:"flex",gap:14,alignItems:"flex-start",boxShadow:"0 2px 10px rgba(45,45,78,0.06)",borderLeft:`4px solid ${IG_COLOR}`}}>
+                  {ig.profileUrl&&<img src={ig.profileUrl} alt={ig.username} style={{width:64,height:64,borderRadius:"50%",objectFit:"cover",flexShrink:0,border:`2px solid ${IG_COLOR}33`}} onError={e=>{e.target.style.display='none';}}/>}
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:4}}><span style={{fontSize:9,fontWeight:800,color:IG_COLOR,textTransform:"uppercase",letterSpacing:1}}>Instagram</span></div>
+                    <div style={{fontWeight:800,fontSize:15,color:C.text}}>{ig.name||ig.username}</div>
+                    <div style={{fontSize:11,color:C.muted,marginBottom:6}}>@{ig.username}</div>
+                    <div style={{fontSize:11,color:C.sub,lineHeight:1.5,whiteSpace:"pre-line",maxHeight:48,overflow:"hidden"}}>{ig.bio}</div>
+                    {ig.website&&<a href={ig.website} target="_blank" rel="noreferrer" style={{fontSize:11,color:IG_COLOR,fontWeight:600,textDecoration:"none",marginTop:6,display:"inline-block"}}>↗ {ig.website.replace(/^https?:\/\//,'').replace(/\/$/,'')}</a>}
+                  </div>
+                </div>)}
+                {/* LI profile card */}
+                {hasLi&&(<div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:14,padding:"16px",display:"flex",gap:14,alignItems:"flex-start",boxShadow:"0 2px 10px rgba(45,45,78,0.06)",borderLeft:`4px solid ${LI_COLOR}`}}>
+                  <div style={{width:64,height:64,borderRadius:"50%",background:`${LI_COLOR}18`,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,fontSize:24,fontWeight:900,color:LI_COLOR,border:`2px solid ${LI_COLOR}33`}}>in</div>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:4}}><span style={{fontSize:9,fontWeight:800,color:LI_COLOR,textTransform:"uppercase",letterSpacing:1}}>LinkedIn</span></div>
+                    <div style={{fontWeight:800,fontSize:15,color:C.text}}>Without® Company Page</div>
+                    <div style={{fontSize:11,color:C.muted,marginBottom:6}}>{liTotal.toLocaleString("en-IN")} followers · {socialsData.liCountry.length} countries</div>
+                    <div style={{fontSize:11,color:C.sub,lineHeight:1.5}}>Top: {topCountries[0]?.country} ({topCountries[0]?.total?Math.round((topCountries[0].total/liTotal)*100):0}%)</div>
+                  </div>
+                </div>)}
+              </div>
+
+              {/* IG KPI row */}
+              {hasIg&&(<div><SectionHead title="Instagram Snapshot" sub={socFromDate||socToDate?"Reach reflects selected period":"Reach is full available history"}/>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:8}}>
+                  <KPI label="Followers" value={fmtNum(ig.followers)} color={IG_COLOR}/>
+                  <KPI label="Following" value={fmtNum(ig.follows)} color={C.sub}/>
+                  <KPI label="Posts" value={fmtNum(ig.media)} color={C.sub}/>
+                  <KPI label="Reach (period)" value={fmtNum(totalReachPeriod)} sub={reachInPeriod.length?`${reachInPeriod.length} days · avg ${fmtNum(avgReachPeriod)}/day`:undefined} color={IG_COLOR}/>
+                </div>
+              </div>)}
+
+              {/* LinkedIn KPI row */}
+              {hasLi&&(<div><SectionHead title="LinkedIn Snapshot" sub={socFromDate||socToDate?"New followers reflect selected period":"New followers across full available range"}/>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:8}}>
+                  <KPI label="Total Followers" value={fmtNum(liTotal)} color={LI_COLOR}/>
+                  <KPI label="New (period)" value={fmtNum(newFollowersPeriod)} sub={liDailyInPeriod.length?`${liDailyInPeriod.length} days · ${organicShare}% organic`:undefined} color={LI_COLOR}/>
+                  <KPI label="Top Country" value={topCountries[0]?.country||"—"} sub={topCountries[0]?`${fmtNum(topCountries[0].total)} followers`:undefined}/>
+                  <KPI label="Top Industry" value={(topIndustries[0]?.industry||"—").slice(0,18)+(topIndustries[0]?.industry?.length>18?"…":"")} sub={topIndustries[0]?`${fmtNum(topIndustries[0].total)} followers`:undefined}/>
+                </div>
+              </div>)}
+
+              {/* Charts */}
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))",gap:12}}>
+                {hasIg&&reachChartData.length>0&&(<div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:14,padding:"16px 16px 12px",boxShadow:"0 2px 8px rgba(45,45,78,0.06)"}}><div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:10,display:"flex",alignItems:"center",gap:6}}><div style={{width:8,height:8,borderRadius:"50%",background:IG_COLOR}}/>IG Daily Reach <span style={{fontSize:10,color:C.muted,fontWeight:400}}>{reachChartData.length} days</span></div><ResponsiveContainer width="100%" height={170}><LineChart data={reachChartData}><CartesianGrid strokeDasharray="3 3" stroke={C.border} vertical={false}/><XAxis dataKey="label" tick={{fill:C.muted,fontSize:9}} axisLine={false} tickLine={false} interval={Math.max(0,Math.floor(reachChartData.length/8))}/><YAxis tickFormatter={v=>fmtNum(v)} tick={{fill:C.muted,fontSize:9}} axisLine={false} tickLine={false} width={42}/><Tooltip formatter={v=>fmtNum(v)} contentStyle={{background:C.card,border:`1px solid ${C.border}`,borderRadius:8,fontSize:11}}/><Line type="monotone" dataKey="reach" stroke={IG_COLOR} strokeWidth={2} dot={false} name="Reach"/></LineChart></ResponsiveContainer></div>)}
+
+                {hasLi&&liChartData.length>0&&(<div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:14,padding:"16px 16px 12px",boxShadow:"0 2px 8px rgba(45,45,78,0.06)"}}><div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:10,display:"flex",alignItems:"center",gap:6}}><div style={{width:8,height:8,borderRadius:"50%",background:LI_COLOR}}/>LinkedIn Cumulative Followers <span style={{fontSize:10,color:C.muted,fontWeight:400}}>{liChartData.length} days</span></div><ResponsiveContainer width="100%" height={170}><LineChart data={liChartData}><CartesianGrid strokeDasharray="3 3" stroke={C.border} vertical={false}/><XAxis dataKey="label" tick={{fill:C.muted,fontSize:9}} axisLine={false} tickLine={false} interval={Math.max(0,Math.floor(liChartData.length/8))}/><YAxis tickFormatter={v=>fmtNum(v)} tick={{fill:C.muted,fontSize:9}} axisLine={false} tickLine={false} width={42}/><Tooltip formatter={(v,n)=>[fmtNum(v),n==="cumulative"?"Total":"New that day"]} contentStyle={{background:C.card,border:`1px solid ${C.border}`,borderRadius:8,fontSize:11}}/><Line type="monotone" dataKey="cumulative" stroke={LI_COLOR} strokeWidth={2} dot={false} name="cumulative"/></LineChart></ResponsiveContainer></div>)}
+
+                {hasLi&&liChartData.length>0&&(<div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:14,padding:"16px 16px 12px",boxShadow:"0 2px 8px rgba(45,45,78,0.06)"}}><div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:10,display:"flex",alignItems:"center",gap:6}}><div style={{width:8,height:8,borderRadius:"50%",background:LI_COLOR}}/>LinkedIn Daily New Followers</div><ResponsiveContainer width="100%" height={170}><BarChart data={liChartData} barSize={Math.max(2,Math.min(10,Math.floor(280/liChartData.length)))}><CartesianGrid strokeDasharray="3 3" stroke={C.border} vertical={false}/><XAxis dataKey="label" tick={{fill:C.muted,fontSize:9}} axisLine={false} tickLine={false} interval={Math.max(0,Math.floor(liChartData.length/8))}/><YAxis tick={{fill:C.muted,fontSize:9}} axisLine={false} tickLine={false} width={32}/><Tooltip contentStyle={{background:C.card,border:`1px solid ${C.border}`,borderRadius:8,fontSize:11}}/><Bar dataKey="daily" fill={LI_COLOR} radius={[3,3,0,0]} name="New"/></BarChart></ResponsiveContainer></div>)}
+              </div>
+
+              {/* LinkedIn breakdowns — country + industry side by side */}
+              {hasLi&&(<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))",gap:12}}>
+                {topCountries.length>0&&(<div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:14,padding:"16px",boxShadow:"0 2px 8px rgba(45,45,78,0.06)"}}><div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:12}}>LinkedIn Followers by Country <span style={{fontSize:10,color:C.muted,fontWeight:400}}>top 10{otherCountriesCount?` of ${socialsData.liCountry.length}`:""}</span></div>{topCountries.map((c,i)=>{const pct=liTotal?(c.total/liTotal)*100:0;return(<div key={c.country} style={{marginBottom:9}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}><span style={{fontSize:11,color:C.text,fontWeight:600}}>{i+1}. {c.country}</span><div style={{display:"flex",gap:8}}><span style={{fontSize:11,fontFamily:"'DM Mono',monospace",fontWeight:700,color:LI_COLOR}}>{fmtNum(c.total)}</span><span style={{fontSize:10,color:C.muted,width:36,textAlign:"right"}}>{pct.toFixed(1)}%</span></div></div><div style={{background:C.border,borderRadius:3,height:5,overflow:"hidden"}}><div style={{height:"100%",background:LI_COLOR,borderRadius:3,width:`${Math.min(100,pct)}%`,transition:"width .4s"}}/></div></div>);})}{otherCountriesCount>0&&<div style={{fontSize:10,color:C.muted,marginTop:8,textAlign:"center"}}>+ {otherCountriesCount} more countries</div>}</div>)}
+
+                {topIndustries.length>0&&(<div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:14,padding:"16px",boxShadow:"0 2px 8px rgba(45,45,78,0.06)"}}><div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:12}}>LinkedIn Followers by Industry <span style={{fontSize:10,color:C.muted,fontWeight:400}}>top 10{otherIndustriesCount?` of ${socialsData.liIndustry.length}`:""}</span></div>{topIndustries.map((it,i)=>{const pct=liTotal?(it.total/liTotal)*100:0;return(<div key={it.industry} style={{marginBottom:9}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}><span style={{fontSize:11,color:C.text,fontWeight:600,maxWidth:"70%",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{i+1}. {it.industry}</span><div style={{display:"flex",gap:8}}><span style={{fontSize:11,fontFamily:"'DM Mono',monospace",fontWeight:700,color:LI_COLOR}}>{fmtNum(it.total)}</span><span style={{fontSize:10,color:C.muted,width:36,textAlign:"right"}}>{pct.toFixed(1)}%</span></div></div><div style={{background:C.border,borderRadius:3,height:5,overflow:"hidden"}}><div style={{height:"100%",background:LI_COLOR,borderRadius:3,width:`${Math.min(100,pct)}%`,transition:"width .4s"}}/></div></div>);})}{otherIndustriesCount>0&&<div style={{fontSize:10,color:C.muted,marginTop:8,textAlign:"center"}}>+ {otherIndustriesCount} more industries</div>}</div>)}
+              </div>)}
+
+              {/* Top reels */}
+              {topReelsByReach.length>0&&(<div><SectionHead title="Top Reels" sub="all-time · ranked by reach · Zoho's report doesn't expose date or caption"/>
+                <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:12,overflow:"hidden",boxShadow:"0 2px 8px rgba(45,45,78,0.06)"}}><div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:560}}><thead><tr style={{background:C.cardAlt}}>{["#","Reel ID","Reach","Likes","Comments","Shares","Saves","Total Eng.","Eng. Rate"].map(h=><th key={h} style={{textAlign:"left",padding:"7px 10px",color:C.muted,fontWeight:700,fontSize:9,textTransform:"uppercase",letterSpacing:0.7,whiteSpace:"nowrap"}}>{h}</th>)}</tr></thead><tbody>{topReelsByReach.map((r,i)=>(<tr key={r.reelId} className="tr" style={{borderTop:`1px solid ${C.border}`}}><td style={{padding:"7px 10px",fontWeight:800,color:i===0?IG_COLOR:C.muted,fontSize:12}}>{i+1}</td><td style={{padding:"7px 10px",fontFamily:"'DM Mono',monospace",fontSize:10.5,color:C.sub}}>{r.reelId}</td><td style={{padding:"7px 10px",fontFamily:"'DM Mono',monospace",fontWeight:700,color:IG_COLOR}}>{fmtNum(r.reach)}</td><td style={{padding:"7px 10px",color:C.sub}}>{fmtNum(r.likes)}</td><td style={{padding:"7px 10px",color:C.sub}}>{fmtNum(r.comments)}</td><td style={{padding:"7px 10px",color:C.sub}}>{fmtNum(r.shares)}</td><td style={{padding:"7px 10px",color:C.sub}}>{fmtNum(r.saved)}</td><td style={{padding:"7px 10px",fontFamily:"'DM Mono',monospace",fontWeight:600}}>{fmtNum(r.interactions)}</td><td style={{padding:"7px 10px"}}><span style={{background:r.engRate>=10?`${IG_COLOR}18`:r.engRate>=5?C.accentLt:C.cardAlt,color:r.engRate>=10?IG_COLOR:r.engRate>=5?C.accent:C.muted,fontFamily:"'DM Mono',monospace",fontWeight:700,padding:"2px 7px",borderRadius:4,fontSize:10}}>{r.engRate}%</span></td></tr>))}</tbody></table></div></div>
+              </div>)}
+            </>)}
           </div>
           );
         })()}
