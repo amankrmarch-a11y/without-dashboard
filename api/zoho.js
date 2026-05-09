@@ -21,67 +21,117 @@ async function getToken() {
   return _token;
 }
 
+// ── Robust CSV state machine — handles \n inside quoted fields ───────────────
+// (the old csvToJson did csv.split('\n') which fragmented multi-line records
+//  like Notes = "Payment terms: 100% Advance\nDelivery fees included\n" and
+//  silently dropped them. This walks character-by-character with proper quote
+//  state tracking across line boundaries.)
 function csvToJson(csv) {
-  const lines = csv.split('\n');
-  const result = [];
-  let headers = null;
-
-  for (const rawLine of lines) {
-    if (!rawLine.trim()) continue;
-    const fields = parseCSVLine(rawLine);
-    if (!headers) { headers = fields.map(h => h.trim()); continue; }
-    if (fields.length < headers.length / 2) continue; // skip badly malformed rows
-    const obj = {};
-    headers.forEach((h, i) => { obj[h] = (fields[i] || '').trim(); });
-    if (Object.values(obj).some(v => v)) result.push(obj);
-  }
-  return result;
-}
-
-function parseCSVLine(line) {
-  const fields = [];
+  const rows = [];
+  let row = [];
   let cur = '';
   let inQuotes = false;
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-    if (ch === '"') {
-      if (inQuotes && line[i+1] === '"') { cur += '"'; i++; } // escaped quote
-      else inQuotes = !inQuotes;
-    } else if (ch === ',' && !inQuotes) {
-      fields.push(cur); cur = '';
+
+  for (let i = 0; i < csv.length; i++) {
+    const ch = csv[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (csv[i + 1] === '"') { cur += '"'; i++; } // escaped quote
+        else inQuotes = false;
+      } else {
+        cur += ch;
+      }
     } else {
-      cur += ch;
+      if (ch === '"') {
+        inQuotes = true;
+      } else if (ch === ',') {
+        row.push(cur); cur = '';
+      } else if (ch === '\n' || ch === '\r') {
+        if (ch === '\r' && csv[i + 1] === '\n') i++;
+        row.push(cur); cur = '';
+        if (row.some(v => v !== '')) rows.push(row);
+        row = [];
+      } else {
+        cur += ch;
+      }
     }
   }
-  fields.push(cur);
-  return fields;
+  if (cur !== '' || row.length) {
+    row.push(cur);
+    if (row.some(v => v !== '')) rows.push(row);
+  }
+
+  if (rows.length < 2) return [];
+  const headers = rows[0].map(h => h.trim());
+  return rows.slice(1).map(r => {
+    const obj = {};
+    headers.forEach((h, i) => { obj[h] = (r[i] || '').trim(); });
+    return obj;
+  });
 }
 
 // ── Single workspace — everything on Anish's (syncs daily) ───────────────────
 const WS_ANISH = '172632000001878083';
 
+// ── fetchView with pagination + explicit JSON response format ────────────────
+// Zoho Analytics /data endpoint paginates. Without CONFIG, the response format
+// and row limit are workspace-dependent (often ~1k rows). We force JSON output
+// and walk pages until we get a short page back.
 async function fetchView(token, viewId, workspaceId, orgId) {
-  const url = `https://analyticsapi.zoho.in/restapi/v2/workspaces/${workspaceId}/views/${viewId}/data`;
-  const r = await fetch(url, {
-    headers: {
-      'Authorization': `Zoho-oauthtoken ${token}`,
-      'ZANALYTICS-ORGID': orgId
+  const baseUrl = `https://analyticsapi.zoho.in/restapi/v2/workspaces/${workspaceId}/views/${viewId}/data`;
+  const PAGE_SIZE = 10000;
+  const MAX_PAGES = 20; // safety cap → 200k rows
+  const all = [];
+
+  for (let pageIndex = 1; pageIndex <= MAX_PAGES; pageIndex++) {
+    const config = encodeURIComponent(JSON.stringify({
+      responseFormat: 'json',
+      keyValueFormat: true,
+      pageIndex,
+      rowsPerPage: PAGE_SIZE
+    }));
+
+    const r = await fetch(`${baseUrl}?CONFIG=${config}`, {
+      headers: {
+        'Authorization': `Zoho-oauthtoken ${token}`,
+        'ZANALYTICS-ORGID': orgId,
+        'Accept': 'application/json'
+      }
+    });
+    const text = await r.text();
+
+    let pageRows;
+    try {
+      const parsed = JSON.parse(text);
+      // Zoho Analytics v2 JSON shapes seen in the wild:
+      //   { data: [...] }
+      //   { response: { data: [...] } }
+      //   [...]
+      if (Array.isArray(parsed)) pageRows = parsed;
+      else if (Array.isArray(parsed.data)) pageRows = parsed.data;
+      else if (Array.isArray(parsed.response?.data)) pageRows = parsed.response.data;
+      else if (Array.isArray(parsed.response?.rows)) pageRows = parsed.response.rows;
+      else pageRows = [];
+    } catch {
+      pageRows = csvToJson(text);
     }
-  });
-  const text = await r.text();
-  try { return JSON.parse(text); } catch { return csvToJson(text); }
+
+    if (!Array.isArray(pageRows) || pageRows.length === 0) break;
+    all.push(...pageRows);
+    if (pageRows.length < PAGE_SIZE) break; // last page
+  }
+  return all;
 }
 
 // ── View IDs — correct IDs from each workspace ────────────────────────────────
 const VIEWS = {
-  crm:      { id: '172632000001936642', ws: WS_ANISH }, // Deals — Anish's workspace
-  invoices: { id: '172632000002062591', ws: WS_ANISH }, // Invoices (Zoho Books) — Anish's workspace
-  meta:     { id: '172632000001947117', ws: WS_ANISH }, // Campaign Insights — Anish's workspace
-  linkedin: { id: '172632000001949105', ws: WS_ANISH }, // Campaigns Performance — Anish's workspace
-  google:   { id: '172632000001946295', ws: WS_ANISH }, // Campaign Performance — Anish's workspace
+  crm:      { id: '172632000001936642', ws: WS_ANISH }, // Deals
+  invoices: { id: '172632000002062591', ws: WS_ANISH }, // Invoices (Zoho Books)
+  meta:     { id: '172632000001947117', ws: WS_ANISH }, // Campaign Insights
+  linkedin: { id: '172632000001949105', ws: WS_ANISH }, // Campaigns Performance
+  google:   { id: '172632000001946295', ws: WS_ANISH }, // Campaign Performance
 };
 
-// Helper — fetch using the view's own workspace
 const fetchV = (token, key, orgId) =>
   fetchView(token, VIEWS[key].id, VIEWS[key].ws, orgId);
 
@@ -100,11 +150,10 @@ export default async function handler(req, res) {
     const ORG   = process.env.ZOHO_ANALYTICS_ORG_ID || '';
     const { source } = req.query;
 
-    // ── Phase 1: Critical — Invoices (yours) + CRM (Anish's) ─────────────────
     if (source === 'critical') {
       const [crm, invoices] = await Promise.all([
-        fetchV(token, 'crm',      ORG), // → Anish's workspace
-        fetchV(token, 'invoices', ORG), // → your workspace
+        fetchV(token, 'crm',      ORG),
+        fetchV(token, 'invoices', ORG),
       ]);
       return res.json({
         success: true, source: 'critical',
@@ -116,12 +165,11 @@ export default async function handler(req, res) {
       });
     }
 
-    // ── Phase 2: Ads — all from Anish's workspace ─────────────────────────────
     if (source === 'ads') {
       const [meta, linkedin, google] = await Promise.all([
-        fetchV(token, 'meta',     ORG), // → Anish's workspace
-        fetchV(token, 'linkedin', ORG), // → Anish's workspace
-        fetchV(token, 'google',   ORG), // → Anish's workspace
+        fetchV(token, 'meta',     ORG),
+        fetchV(token, 'linkedin', ORG),
+        fetchV(token, 'google',   ORG),
       ]);
       return res.json({
         success: true, source: 'ads',
@@ -131,7 +179,6 @@ export default async function handler(req, res) {
       });
     }
 
-    // ── All at once (fallback / manual) ──────────────────────────────────────
     if (!source || source === 'all') {
       const [crm, invoices, meta, linkedin, google] = await Promise.all([
         fetchV(token, 'crm',      ORG),
@@ -150,13 +197,11 @@ export default async function handler(req, res) {
       });
     }
 
-    // ── Single source (for debugging) ─────────────────────────────────────────
     if (VIEWS[source]) {
       const data = await fetchV(token, source, ORG);
       return res.json(wrap(data, source));
     }
 
-    // ── List views (debug helper) ─────────────────────────────────────────────
     if (source === 'list_views') {
       const r = await fetch(
         `https://analyticsapi.zoho.in/restapi/v2/workspaces/${WS_ANISH}/views`,
@@ -170,7 +215,7 @@ export default async function handler(req, res) {
       });
     }
 
-    return res.json({ success: true, message: 'v13 Dual-workspace Zoho API — sources: critical | ads | all | crm | invoices | meta | linkedin | google | list_views' });
+    return res.json({ success: true, message: 'v14 Zoho API with pagination + multi-line CSV parser — sources: critical | ads | all | crm | invoices | meta | linkedin | google | list_views' });
 
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
