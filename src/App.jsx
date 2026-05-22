@@ -129,7 +129,7 @@ function parseInvoiceFile(rows) {
     const yearMonth = toYearMonth(row[colDate])||month;
     const subtotal     = toNum(row[colSubtotal]);
     const exchangeRate = colExRate?(toNum(row[colExRate])||1):1;
-    const totalSales   = subtotal * exchangeRate;              // Rule 4: Sub × FX = INR
+    const totalSales   = subtotal;                            // Rule 4: Sub Total (BCY) is ALREADY in INR — do NOT multiply by FX
     invoices.push({
       invoiceNumber:invNum, month, yearMonth,
       date:toDate(row[colDate])||'', status, businessType:bizType,
